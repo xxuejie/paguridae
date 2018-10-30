@@ -4,7 +4,7 @@ function id() {
   return nextId++;
 }
 
-export function init() {
+function init() {
   return {
     columns: [
       {
@@ -37,5 +37,13 @@ export function init() {
         ]
       }
     ]
+  }
+}
+
+export class Api {
+  constructor(onchange) {
+    this.onchange = onchange;
+    this.data = init();
+    onchange(this.data);
   }
 }
