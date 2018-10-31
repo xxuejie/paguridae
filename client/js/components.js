@@ -65,27 +65,8 @@ export class Row {
     this.content = el(".content");
     this.el = el(".row", [this.label, this.content]);
 
-    this.label.onaction = function(button) {
-      console.log("label on trigger: ", button);
-      console.log("Selection: ", this.labelEditor.getSelection());
-    }.bind(this);
-    this.content.onaction = function(button) {
-      console.log("content on trigger: ", button);
-      console.log("Selection: ", this.contentEditor.getSelection());
-    }.bind(this);
-  }
-
-  onmount() {
     this.labelEditor = new Quill(this.label);
-    if (this.labelContents) {
-      this.labelEditor.updateContents(this.labelContents);
-      this.labelContents = null;
-    }
     this.contentEditor = new Quill(this.content);
-    if (this.contentContents) {
-      this.contentEditor.updateContents(this.contentContents);
-      this.contentContents = null;
-    }
 
     this.labelEditor.on("selection-change", function(range, oldRange) {
       console.log(`Row ${this.id} label change from: `, oldRange, " to: ", range);
@@ -99,6 +80,15 @@ export class Row {
     this.contentEditor.on("text-change", function(delta) {
       console.log("Editor content change: ", delta);
     });
+
+    this.label.onaction = function(button) {
+      console.log("label on trigger: ", button);
+      console.log("Selection: ", this.labelEditor.getSelection());
+    }.bind(this);
+    this.content.onaction = function(button) {
+      console.log("content on trigger: ", button);
+      console.log("Selection: ", this.contentEditor.getSelection());
+    }.bind(this);
   }
 
   update({height, label, content}) {
@@ -106,18 +96,10 @@ export class Row {
       setStyle(this.el, {height: `${height}%`});
     }
     if (label) {
-      this.labelContents = new Delta(label);
-      if (this.labelEditor) {
-        this.labelEditor.updateContents(this.labelContents);
-        this.labelContents = null;
-      }
+      this.labelEditor.updateContents(new Delta(label));
     }
     if (content) {
-      this.contentContents = new Delta(content);
-      if (this.contentEditor) {
-        this.contentEditor.updateContents(this.contentContents);
-        this.contentContents = null;
-      }
+      this.contentEditor.updateContents(new Delta(content));
     }
   }
 }
