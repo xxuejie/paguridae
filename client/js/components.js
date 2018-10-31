@@ -1,7 +1,6 @@
-import { fill } from "./layout.js";
 import { redom, Quill } from "./externals.js";
 
-const {el, list, setStyle} = window.redom;
+const {el, listPool, setChildren, setStyle} = window.redom;
 const Delta = Quill.import("delta");
 
 const BUTTONS = {
@@ -13,9 +12,10 @@ Object.freeze(BUTTONS);
 
 export class Window {
   constructor() {
-    this.el = list(".window", Column, "id");
+    this.el = el(".window");
+    this.rows = listPool(Row, "id");
 
-    this.el.el.addEventListener("click", function(event) {
+    this.el.addEventListener("click", function(event) {
       let button = BUTTONS.LEFT;
       if (event.button === 0 && event.altKey) {
         button = BUTTONS.MIDDLE;
@@ -24,7 +24,7 @@ export class Window {
         this.testForAction(event.target, button);
       }
     }.bind(this));
-    this.el.el.addEventListener("contextmenu", function(event) {
+    this.el.addEventListener("contextmenu", function(event) {
       event.preventDefault();
       this.testForAction(event.target, BUTTONS.RIGHT);
     }.bind(this));
@@ -39,9 +39,32 @@ export class Window {
     }
   }
 
-  update({columns}) {
-    const columnsWithWidths = fill(columns, "width");
-    this.el.update(columnsWithWidths);
+  update({layout, changes}) {
+    const rowData = [].concat(...layout.columns.map(function({rows}) {
+      return rows;
+    }));
+    this.rows.update(rowData);
+    const { lookup } = this.rows;
+
+    const columnEls = layout.columns.map(function({rows, width}) {
+      const columnEl = el(".column");
+      setStyle(columnEl, {width: `${width}%`});
+
+      const rowEls = rows.map(function({id}) {
+        return lookup[id];
+      });
+
+      setChildren(columnEl, rowEls);
+      return columnEl;
+    });
+    setChildren(this.el, columnEls);
+
+    changes.forEach(function(change) {
+      const row = lookup[change.id];
+      if (row) {
+        row.update(change);
+      }
+    });
   }
 }
 
@@ -53,8 +76,7 @@ export class Column {
 
   update({rows, width}) {
     setStyle(this.el, {width: `${width}%`});
-    const rowsWithHeights = fill(rows, "height");
-    this.el.update(rowsWithHeights);
+    this.el.update(rows);
   }
 }
 
