@@ -68,18 +68,6 @@ export class Window {
   }
 }
 
-export class Column {
-  constructor(_initData, { id }) {
-    this.id = id;
-    this.el = list(".column", Row, "id");
-  }
-
-  update({rows, width}) {
-    setStyle(this.el, {width: `${width}%`});
-    this.el.update(rows);
-  }
-}
-
 export class Row {
   constructor(_initData, { id }) {
     this.id = id;
