@@ -40,26 +40,28 @@ export class Window {
   }
 
   update({layout, changes}) {
-    const rowData = [].concat(...layout.columns.map(function({rows}) {
-      return rows;
-    }));
-    this.rows.update(rowData);
-    const { lookup } = this.rows;
+    if (layout) {
+      const rowData = [].concat(...layout.columns.map(function({rows}) {
+        return rows;
+      }));
+      this.rows.update(rowData);
+      const { lookup } = this.rows;
 
-    const columnEls = layout.columns.map(function({rows, width}) {
-      const columnEl = el(".column");
-      setStyle(columnEl, {width: `${width}%`});
+      const columnEls = layout.columns.map(function({rows, width}) {
+        const columnEl = el(".column");
+        setStyle(columnEl, {width: `${width}%`});
 
-      const rowEls = rows.map(function({id}) {
-        return lookup[id];
+        const rowEls = rows.map(function({id}) {
+          return lookup[id];
+        });
+
+        setChildren(columnEl, rowEls);
+        return columnEl;
       });
+      setChildren(this.el, columnEls);
+    }
 
-      setChildren(columnEl, rowEls);
-      return columnEl;
-    });
-    setChildren(this.el, columnEls);
-
-    changes.forEach(function(change) {
+    (changes || []).forEach(function(change) {
       const row = lookup[change.id];
       if (row) {
         row.update(change);
