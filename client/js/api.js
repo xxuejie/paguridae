@@ -67,34 +67,48 @@ class Layout {
 }
 
 export class Api {
-  constructor(onchange) {
-    this.onchange = onchange;
+  constructor() {
     this.layout = new Layout();
 
     const row1Id = this.layout.createRow();
     const row2Id = this.layout.createRow();
     this.layout.createRow();
 
+    this.changes = [
+      {
+        id: row1Id,
+        content: [
+          {
+            insert: "Foobar\nLine 2\n\nAnotherLine"
+          }
+        ]
+      },
+      {
+        id: row2Id,
+        label: [
+          {
+            insert: "~ | New Newcol Cut Copy Paste"
+          }
+        ]
+      }
+    ];
+  }
+
+  init(onchange) {
+    this.onchange = onchange;
     onchange({
       layout: this.layout.data,
-      changes: [
-        {
-          id: row1Id,
-          content: [
-            {
-              insert: "Foobar\nLine 2\n\nAnotherLine"
-            }
-          ]
-        },
-        {
-          id: row2Id,
-          label: [
-            {
-              insert: "~ | New Newcol Cut Copy Paste"
-            }
-          ]
-        }
-      ]
+      changes: this.changes
     });
+  }
+
+  execute({id, type, selection}) {
+    const {index, length} = selection;
+    console.log(`Executing on ${id}, type: ${type}, index: ${index}, length: ${length}`);
+  }
+
+  search({id, type, selection}) {
+    const {index, length} = selection;
+    console.log(`Searching on ${id}, type: ${type}, index: ${index}, length: ${length}`);
   }
 }

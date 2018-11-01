@@ -3,39 +3,46 @@ import { redom, Quill } from "./externals.js";
 const {el, listPool, setChildren, setStyle} = window.redom;
 const Delta = Quill.import("delta");
 
-const BUTTONS = {
-  LEFT: 0,
-  MIDDLE: 2,
-  RIGHT: 4
+const WHITESPACE = /^\s$/;
+const ACTIONS = {
+  // Middle click
+  2: "execute",
+  // Right click
+  4: "search"
 };
-Object.freeze(BUTTONS);
+Object.freeze(ACTIONS);
 
 export class Window {
-  constructor() {
+  constructor(api) {
     this.el = el(".window");
-    this.rows = listPool(Row, "id");
+    this.rows = listPool(Row, "id", api);
 
-    this.el.addEventListener("click", function(event) {
-      let button = BUTTONS.LEFT;
-      if (event.button === 0 && event.altKey) {
-        button = BUTTONS.MIDDLE;
+    api.init(data => {
+      this.update(data);
+    });
+
+    this.el.addEventListener("click", event => {
+      let button = event.button;
+      if (button === 0 && event.altKey) {
+        button = 2;
       }
-      if (button !== BUTTONS.LEFT) {
-        this.testForAction(event.target, button);
+      const action = ACTIONS[button];
+      if (action) {
+        this.testForAction(event.target, action);
       }
-    }.bind(this));
-    this.el.addEventListener("contextmenu", function(event) {
+    });
+    this.el.addEventListener("contextmenu", event => {
       event.preventDefault();
-      this.testForAction(event.target, BUTTONS.RIGHT);
-    }.bind(this));
+      this.testForAction(event.target, ACTIONS[4]);
+    });
   }
 
-  testForAction(target, button) {
-    while (target != this.el.el && (!target.onaction) && target.parentElement) {
+  testForAction(target, type) {
+    while (target != this.el && (!target.onaction) && target.parentElement) {
       target = target.parentElement;
     }
     if (target.onaction) {
-      target.onaction(button);
+      target.onaction(type);
     }
   }
 
@@ -74,7 +81,8 @@ export class Window {
 }
 
 export class Row {
-  constructor(_initData, { id }) {
+  constructor(api, { id }) {
+    this.api = api;
     this.id = id;
     this.label = el(".label");
     this.content = el(".content");
@@ -83,27 +91,52 @@ export class Row {
     this.labelEditor = new Quill(this.label);
     this.contentEditor = new Quill(this.content);
 
-    this.labelEditor.on("selection-change", function(range, oldRange) {
-      console.log(`Row ${this.id} label change from: `, oldRange, " to: ", range);
-      console.log("Saved range: ", this.labelEditor.selection.savedRange);
-    }.bind(this));
-    this.contentEditor.on("selection-change", function(range, oldRange) {
-      console.log(`Row ${this.id} content change from: `, oldRange, " to: ", range);
-      console.log("Saved range: ", this.contentEditor.selection.savedRange);
-    }.bind(this));
+    this.label.onaction = action => {
+      this.onaction(action, this.labelEditor, "label");
+    };
+    this.content.onaction = action => {
+      this.onaction(action, this.contentEditor, "context");
+    };
+  }
 
-    this.contentEditor.on("text-change", function(delta) {
-      console.log("Editor content change: ", delta);
+  onaction(action, editor, type) {
+    let selection = editor.getSelection();
+    if (selection.length === 0) {
+      // expand selection around cursor
+      const {index} = selection;
+      const sliceStart = Math.max(index - 100, 0);
+      const sliceEnd = Math.min(index + 100, editor.getLength());
+      const text1 = editor.getText(sliceStart, index);
+      const text2 = editor.getText(index, sliceEnd);
+      let text1SpaceIndex = -1;
+      for (const [i, ch] of text1.split("").entries()) {
+        if (WHITESPACE.test(ch)) {
+          text1SpaceIndex = i;
+        }
+      }
+      const selectionStart = text1SpaceIndex + 1 + sliceStart;
+      let text2SpaceIndex = -1;
+      for (const [i, ch] of text2.split("").entries()) {
+        if (WHITESPACE.test(ch)) {
+          text2SpaceIndex = i;
+          break;
+        }
+      }
+      let selectionEnd = sliceEnd;
+      if (text2SpaceIndex >= 0) {
+        selectionEnd = text2SpaceIndex + index;
+      }
+      selection = {
+        index: selectionStart,
+        length: selectionEnd - selectionStart
+      };
+    }
+    console.log(`Selecting: "${editor.getText(selection.index, selection.length)}"`);
+    this.api[action]({
+      id: this.id,
+      type,
+      selection
     });
-
-    this.label.onaction = function(button) {
-      console.log("label on trigger: ", button);
-      console.log("Selection: ", this.labelEditor.getSelection());
-    }.bind(this);
-    this.content.onaction = function(button) {
-      console.log("content on trigger: ", button);
-      console.log("Selection: ", this.contentEditor.getSelection());
-    }.bind(this);
   }
 
   update({height, label, content}) {
