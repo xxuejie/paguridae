@@ -61,12 +61,15 @@ export class Window {
       setChildren(this.el, columnEls);
     }
 
-    (changes || []).forEach(function(change) {
-      const row = lookup[change.id];
-      if (row) {
-        row.update(change);
-      }
-    });
+    if (changes) {
+      const { lookup } = this.rows;
+      changes.forEach(function(change) {
+        const row = lookup[change.id];
+        if (row) {
+          row.update(change);
+        }
+      });
+    }
   }
 }
 
