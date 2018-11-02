@@ -6,9 +6,9 @@ const Delta = Quill.import("delta");
 const WHITESPACE = /^\s$/;
 const ACTIONS = {
   // Middle click
-  2: "execute",
+  1: "execute",
   // Right click
-  4: "search"
+  2: "search"
 };
 Object.freeze(ACTIONS);
 
@@ -21,10 +21,10 @@ export class Window {
       this.update(data);
     });
 
-    this.el.addEventListener("click", event => {
+    this.el.addEventListener("mouseup", event => {
       let button = event.button;
       if (button === 0 && event.altKey) {
-        button = 2;
+        button = 1;
       }
       const action = ACTIONS[button];
       if (action) {
@@ -33,7 +33,6 @@ export class Window {
     });
     this.el.addEventListener("contextmenu", event => {
       event.preventDefault();
-      this.testForAction(event.target, ACTIONS[4]);
     });
   }
 
