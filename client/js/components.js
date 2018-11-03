@@ -21,28 +21,62 @@ export class Window {
       this.update(data);
     });
 
+    this.el.addEventListener("mousedown", event => {
+      const action = this.extractAction(event);
+      if (!action) { return ;}
+      const editor = this.findEditor(event);
+      this.mousedownSelection = editor.__row.selection(editor.__type);
+    });
     this.el.addEventListener("mouseup", event => {
-      let button = event.button;
-      if (button === 0 && event.altKey) {
-        button = 1;
+      const action = this.extractAction(event);
+      if (!action) { return ;}
+      const editor = this.findEditor(event);
+      const selection = editor.__row.selection(editor.__type);
+      // When mouseup lands on a different editor from mousedown, selection
+      // would return null.
+      if (!selection) { return; }
+
+      // When selection in current mouseup event matches selection from
+      // mousedown event, we will do nothing to the selection since this is
+      // a user specified selection. However, if 2 selections do not match,
+      // it must be browser that's filling selection for us, we would reset
+      // selection length to 0, and only keep cursor position so we can properly
+      // expand selection at backend. Notice it might happen that cursor is
+      // in the middle of a word, but in the reset process, we are only
+      // resetting the cursor to the start of the word. Based on current
+      // selection logic in the browser and backend, this won't affect anything.
+      if ((!this.mousedownSelection) ||
+          (selection.index !== this.mousedownSelection.index &&
+           selection.length !== this.mousedownSelection.length)) {
+        selection.length = 0;
       }
-      const action = ACTIONS[button];
-      if (action) {
-        this.testForAction(event.target, action);
-      }
+
+      api[action]({
+        id: editor.__row.id,
+        type: editor.__type,
+        selection,
+      });
     });
     this.el.addEventListener("contextmenu", event => {
       event.preventDefault();
+      return false;
     });
   }
 
-  testForAction(target, type) {
-    while (target != this.el && (!target.onaction) && target.parentElement) {
+  extractAction(event) {
+    let button = event.button;
+    if (button === 0 && event.altKey) {
+      button = 1;
+    }
+    return ACTIONS[button];
+  }
+
+  findEditor(event) {
+    let target = event.target;
+    while (target != this.el && (!target.__row) && target.parentElement) {
       target = target.parentElement;
     }
-    if (target.onaction) {
-      target.onaction(type);
-    }
+    return target;
   }
 
   update({layout, changes}) {
@@ -80,8 +114,7 @@ export class Window {
 }
 
 export class Row {
-  constructor(api, { id }) {
-    this.api = api;
+  constructor(_initData, { id }) {
     this.id = id;
     this.label = el(".label");
     this.content = el(".content");
@@ -90,52 +123,20 @@ export class Row {
     this.labelEditor = new Quill(this.label);
     this.contentEditor = new Quill(this.content);
 
-    this.label.onaction = action => {
-      this.onaction(action, this.labelEditor, "label");
-    };
-    this.content.onaction = action => {
-      this.onaction(action, this.contentEditor, "context");
-    };
+    this.label.__row = this;
+    this.content.__row = this;
+
+    this.label.__type = "label";
+    this.content.__type = "content";
   }
 
-  onaction(action, editor, type) {
-    let selection = editor.getSelection();
-    if (selection.length === 0) {
-      // expand selection around cursor
-      const {index} = selection;
-      const sliceStart = Math.max(index - 100, 0);
-      const sliceEnd = Math.min(index + 100, editor.getLength());
-      const text1 = editor.getText(sliceStart, index);
-      const text2 = editor.getText(index, sliceEnd);
-      let text1SpaceIndex = -1;
-      for (const [i, ch] of text1.split("").entries()) {
-        if (WHITESPACE.test(ch)) {
-          text1SpaceIndex = i;
-        }
-      }
-      const selectionStart = text1SpaceIndex + 1 + sliceStart;
-      let text2SpaceIndex = -1;
-      for (const [i, ch] of text2.split("").entries()) {
-        if (WHITESPACE.test(ch)) {
-          text2SpaceIndex = i;
-          break;
-        }
-      }
-      let selectionEnd = sliceEnd;
-      if (text2SpaceIndex >= 0) {
-        selectionEnd = text2SpaceIndex + index;
-      }
-      selection = {
-        index: selectionStart,
-        length: selectionEnd - selectionStart
-      };
+  selection(type) {
+    if (type === "label") {
+      return this.labelEditor.getSelection();
+    } else if (type === "content") {
+      return this.contentEditor.getSelection();
     }
-    console.log(`Selecting: "${editor.getText(selection.index, selection.length)}"`);
-    this.api[action]({
-      id: this.id,
-      type,
-      selection
-    });
+    return null;
   }
 
   update({height, label, content}) {
