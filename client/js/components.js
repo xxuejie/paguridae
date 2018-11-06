@@ -61,6 +61,14 @@ export class Window {
       event.preventDefault();
       return false;
     });
+    this.el.addEventListener("dragend", event => {
+      const id = event.target.__id;
+      if (!id) { return; }
+
+      const x = event.clientX / window.innerWidth * 100;
+      const y = event.clientY / window.innerHeight * 100;
+      api.move({id, x, y});
+    });
   }
 
   extractAction(event) {
@@ -116,12 +124,16 @@ export class Window {
 export class Row {
   constructor(_initData, { id }) {
     this.id = id;
+    this.resizer = el(".resizer", {draggable: true});
     this.label = el(".label");
+    this.header = el(".header", [this.resizer, this.label]);
     this.content = el(".content");
-    this.el = el(".row", [this.label, this.content]);
+    this.el = el(".row", [this.header, this.content]);
 
     this.labelEditor = new Quill(this.label);
     this.contentEditor = new Quill(this.content);
+
+    this.resizer.__id = this.id;
 
     this.label.__row = this;
     this.content.__row = this;

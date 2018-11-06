@@ -42,8 +42,22 @@ html, body, .view {
   border-top: none;
 }
 
-.label {
+.header {
+  display: flex;
   border-bottom: 1px solid #999;
+}
+
+.resizer {
+  cursor: pointer;
+  flex-direction: column;
+  border: 2px solid #666;
+  margin-right: 2px;
+  width: 10px;
+}
+
+.label {
+  flex-direction: column;
+  flex: 1;
   height: auto;
   max-height: 30%;
 }

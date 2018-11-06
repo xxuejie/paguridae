@@ -111,4 +111,8 @@ export class Api {
     const {index, length} = selection;
     console.log(`Searching on ${id}, type: ${type}, index: ${index}, length: ${length}`);
   }
+
+  move({id, x, y}) {
+    console.log(`Moving ${id}, x: ${x}, y: ${y}`);
+  }
 }
