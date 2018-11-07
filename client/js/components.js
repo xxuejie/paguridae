@@ -25,12 +25,14 @@ export class Window {
       const action = this.extractAction(event);
       if (!action) { return ;}
       const editor = this.findEditor(event);
+      if ((!editor) || (!editor.__row)) { return ;}
       this.mousedownSelection = editor.__row.selection(editor.__type);
     });
     this.el.addEventListener("mouseup", event => {
       const action = this.extractAction(event);
       if (!action) { return ;}
       const editor = this.findEditor(event);
+      if ((!editor) || (!editor.__row)) { return ;}
       const selection = editor.__row.selection(editor.__type);
       // When mouseup lands on a different editor from mousedown, selection
       // would return null.
