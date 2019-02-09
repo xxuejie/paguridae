@@ -4,10 +4,16 @@ import (
 	"github.com/fmpwizard/go-quilljs-delta/delta"
 )
 
+type Selection struct {
+	Index  uint32 `json:"index"`
+	Length uint32 `json:"length"`
+}
+
 type EditorChange struct {
-	Id      uint32       `json:"id"`
-	Label   *delta.Delta `json:"label,omitempty"`
-	Content *delta.Delta `json:"content,omitempty"`
+	Id        uint32       `json:"id"`
+	Label     *delta.Delta `json:"label,omitempty"`
+	Content   *delta.Delta `json:"content,omitempty"`
+	Selection *Selection   `json:"selection,omitempty"`
 }
 
 type Response struct {
@@ -18,7 +24,7 @@ type Response struct {
 	Changes []EditorChange `json:"changes,omitempty"`
 }
 
-type Action struct {
+type SearchOrExecute struct {
 	Id     uint32
 	Type   string
 	Index  uint32
@@ -28,6 +34,7 @@ type Action struct {
 type Request struct {
 	// Changes to be synced to the backend, notice the changes here are
 	// expected to happen before the included action(if exists)
-	Changes []EditorChange `json:"changes,omitempty"`
-	action  *Action        `json:"changes,omitempty"`
+	Changes []EditorChange   `json:"changes,omitempty"`
+	Execute *SearchOrExecute `json:"execute,omitempty"`
+	Search  *SearchOrExecute `json:"search,omitempty"`
 }
