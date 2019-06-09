@@ -1,26 +1,78 @@
 package main // import "github.com/xxuejie/paguridae"
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 
-	"github.com/gorilla/websocket"
+	"github.com/fmpwizard/go-quilljs-delta/delta"
+	"nhooyr.io/websocket"
 )
+
+// A row is just an editor window, we call it a row since in it you get
+// actually 2 editors: a label editor, and a content editor
+type Row struct {
+	Id      int          `json:"id"`
+	Label   *delta.Delta `json:"label,omitempty"`
+	Content *delta.Delta `json:"content,omitempty"`
+}
+
+// All deltas included in this struct(included nested ones) are optional,
+// if one is missing, it means no change is made on this part.
+type Change struct {
+	Layout *delta.Delta `json:"layout,omitempty"`
+	Rows   []Row        `json:"rows,omitempty"`
+}
 
 var port = flag.Int("port", 8000, "port to listen for http server")
 var useLocalAsset = flag.Bool("useLocalAsset", false, "development only, you shouldn't use true in production")
 
-var upgrader = websocket.Upgrader{}
-
 func webSocketHandler(w http.ResponseWriter, req *http.Request) {
-	_, err := upgrader.Upgrade(w, req, nil)
+	c, err := websocket.Accept(w, req, websocket.AcceptOptions{})
 	if err != nil {
 		log.Print("Error upgrading websocket:", err)
 		return
 	}
+	defer c.Close(websocket.StatusInternalError, "oops")
 	log.Print("Websocket connection established!")
+
+	initialChange := Change{
+		Layout: delta.New(nil).Insert("1\n2", nil),
+		Rows: []Row{
+			Row{
+				Id:      1,
+				Label:   delta.New(nil).Insert(" | New Newcol Cut Copy Paste", nil),
+				Content: delta.New(nil).Insert("Foobar\nLine 2\n\nAnotherLine", nil),
+			},
+			Row{
+				Id:      2,
+				Label:   delta.New(nil).Insert("~ | New Newcol Cut Copy Paste", nil),
+				Content: nil,
+			},
+		},
+	}
+	initialChangeBytes, err := json.Marshal(initialChange)
+	if err != nil {
+		log.Print("Error marshaling json:", err)
+		return
+	}
+	err = c.Write(req.Context(), websocket.MessageText, initialChangeBytes)
+	if err != nil {
+		log.Print("Error sending initial change:", err)
+		return
+	}
+
+	for {
+		t, b, err := c.Read(req.Context())
+		if err != nil {
+			log.Print("Error reading message:", err)
+			return
+		}
+
+		fmt.Println("Message type:", t, "content:", b)
+	}
 }
 
 func main() {

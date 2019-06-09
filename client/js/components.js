@@ -89,7 +89,7 @@ export class Window {
     return target;
   }
 
-  update({layout, changes}) {
+  update({layout, rows}) {
     if (layout) {
       const rowData = [].concat(...layout.columns.map(function({rows}) {
         return rows;
@@ -111,9 +111,9 @@ export class Window {
       setChildren(this.el, columnEls);
     }
 
-    if (changes) {
+    if (rows) {
       const { lookup } = this.rows;
-      changes.forEach(function(change) {
+      rows.forEach(function(change) {
         const row = lookup[change.id];
         if (row) {
           row.update(change);
