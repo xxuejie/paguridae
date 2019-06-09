@@ -45,6 +45,7 @@ html, body, .view {
 .header {
   display: flex;
   border-bottom: 1px solid #999;
+  max-height: 30%;
 }
 
 .resizer {
@@ -59,5 +60,4 @@ html, body, .view {
   flex-direction: column;
   flex: 1;
   height: auto;
-  max-height: 30%;
 }

@@ -1,5 +1,5 @@
 build:
-	vgo build
+	go build
 
 dev: generate-static build
 	./paguridae -useLocalAsset=true
