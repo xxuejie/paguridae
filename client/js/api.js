@@ -131,14 +131,8 @@ export class Api {
     this.connection.connect();
   }
 
-  execute({id, type, selection}) {
-    const {index, length} = selection;
-    console.log(`Executing on ${id}, type: ${type}, index: ${index}, length: ${length}`);
-  }
-
-  search({id, type, selection}) {
-    const {index, length} = selection;
-    console.log(`Searching on ${id}, type: ${type}, index: ${index}, length: ${length}`);
+  action(data) {
+    this.connection.send(JSON.stringify(data));
   }
 
   move({id, x, y}) {

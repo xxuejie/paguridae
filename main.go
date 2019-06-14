@@ -71,7 +71,7 @@ func webSocketHandler(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 
-		fmt.Println("Message type:", t, "content:", b)
+		fmt.Println("Message type:", t, "content:", string(b))
 	}
 }
 

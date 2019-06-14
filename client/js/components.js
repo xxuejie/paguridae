@@ -53,10 +53,12 @@ export class Window {
         selection.length = 0;
       }
 
-      api[action]({
+      api.action({
+        action,
         id: editor.__row.id,
         type: editor.__type,
-        selection,
+        index: selection.index,
+        length: selection.length
       });
     });
     this.el.addEventListener("contextmenu", event => {
