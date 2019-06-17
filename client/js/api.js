@@ -91,22 +91,30 @@ class Connection {
     const self = this;
     const ws = this.ws = new window.WebSocket("ws://" + document.location.host + "/ws");
     ws.onclose = ws.onerror = function() {
-      console.log(`Connection closed, reconnect in ${self.backoff} milliseconds`);
-      window.setTimeout(function () {
-        self.connect();
-      }, self.backoff);
-      self.backoff = self.backoff * 2;
+      /* TODO: Add reconnect logic once we have state syncing in place. */
+      console.log("Disconnected!");
+      self.connected = false;
+      /* console.log(`Connection closed, reconnect in ${self.backoff} milliseconds`);
+       * window.setTimeout(function () {
+       *   self.connect();
+       * }, self.backoff);
+       * self.backoff = self.backoff * 2; */
     };
     ws.onmessage = function (event) {
       self.onchange(JSON.parse(event.data));
     }
     ws.onopen = function (event) {
       console.log("Connection initiated!");
+      self.connected = true;
       self.backoff = INITIAL_BACKOFF_MS;
     }
   }
 
   send(message) {
+    if (!this.connected) {
+      window.alert("Not connected!");
+      return;
+    }
     /* All communication is asynchronous, no need to get a response here */
     this.ws.send(JSON.stringify(message));
   }
