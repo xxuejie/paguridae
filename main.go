@@ -19,6 +19,19 @@ type Row struct {
 	Content *delta.Delta `json:"content,omitempty"`
 }
 
+type Action struct {
+	Id     int    `json:"id"`
+	Action string `json:"action"`
+	Type   string `json:"type"`
+	Index  int    `json:"index"`
+	Length int    `json:"length"`
+}
+
+type Request struct {
+	Rows   []Row  `json:"rows"`
+	Action Action `json:"action"`
+}
+
 // All deltas included in this struct(included nested ones) are optional,
 // if one is missing, it means no change is made on this part.
 type Change struct {
@@ -65,13 +78,20 @@ func webSocketHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	for {
-		t, b, err := c.Read(req.Context())
+		_, b, err := c.Read(req.Context())
 		if err != nil {
 			log.Print("Error reading message:", err)
 			return
 		}
+		log.Print("Message: ", string(b))
+		var request Request
+		err = json.Unmarshal(b, &request)
+		if err != nil {
+			log.Print("Error unmarshaling message:", err)
+			continue
+		}
 
-		fmt.Println("Message type:", t, "content:", string(b))
+		log.Print("Request:", request)
 	}
 }
 

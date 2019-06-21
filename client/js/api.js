@@ -123,6 +123,7 @@ class Connection {
 export class Api {
   constructor() {
     this.layout = new Layout();
+    this.rows = {};
   }
 
   init(onchange) {
@@ -139,8 +140,19 @@ export class Api {
     this.connection.connect();
   }
 
+  textchange(id, type, delta) {
+    this.rows[id] = this.rows[id] || { id: id };
+    this.rows[id][type] = this.rows[id][type] || new Delta();
+    this.rows[id][type] = this.rows[id][type].compose(delta);
+  }
+
   action(data) {
-    this.connection.send(JSON.stringify(data));
+    const rows = Object.values(this.rows);
+    this.rows = {};
+    this.connection.send({
+      rows,
+      action: data
+    });
   }
 
   move({id, x, y}) {

@@ -126,7 +126,7 @@ export class Window {
 }
 
 export class Row {
-  constructor(_initData, { id }) {
+  constructor(api, { id }) {
     this.id = id;
     this.resizer = el(".resizer", {draggable: true});
     this.label = el(".label");
@@ -144,6 +144,17 @@ export class Row {
 
     this.label.__type = "label";
     this.content.__type = "content";
+
+    this.labelEditor.on("text-change", (delta, _oldDelta, source) => {
+      if (source === "user") {
+        api.textchange(id, "label", delta);
+      }
+    });
+    this.contentEditor.on("text-change", (delta, _oldDelta, source) => {
+      if (source === "user") {
+        api.textchange(id, "content", delta);
+      }
+    });
   }
 
   selection(type) {
