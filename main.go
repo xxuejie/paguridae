@@ -7,7 +7,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/xxuejie/go-quilljs-delta/delta"
+	"github.com/fmpwizard/go-quilljs-delta/delta"
 	"nhooyr.io/websocket"
 )
 
