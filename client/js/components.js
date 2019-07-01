@@ -1,9 +1,8 @@
 import { redom, Quill } from "./externals.js";
 
-const {el, listPool, setChildren, setStyle} = window.redom;
+const {el, listPool, setChildren, setStyle} = redom;
 const Delta = Quill.import("delta");
 
-const WHITESPACE = /^\s$/;
 const ACTIONS = {
   // Middle click
   1: "execute",
@@ -11,6 +10,8 @@ const ACTIONS = {
   2: "search"
 };
 Object.freeze(ACTIONS);
+
+const IS_MOBILE = /Android|iPhone|iPad/i.test(window.navigator.userAgent);
 
 export class Window {
   constructor(api) {
@@ -25,14 +26,14 @@ export class Window {
       const action = this.extractAction(event);
       if (!action) { return ;}
       const editor = this.findEditor(event);
-      if ((!editor) || (!editor.__row)) { return ;}
+      if ((!editor) || (!editor.__row)) { return; }
       this.mousedownSelection = editor.__row.selection(editor.__type);
     });
     this.el.addEventListener("mouseup", event => {
       const action = this.extractAction(event);
       if (!action) { return ;}
       const editor = this.findEditor(event);
-      if ((!editor) || (!editor.__row)) { return ;}
+      if ((!editor) || (!editor.__row)) { return; }
       const selection = editor.__row.selection(editor.__type);
       // When mouseup lands on a different editor from mousedown, selection
       // would return null.
@@ -61,10 +62,43 @@ export class Window {
         length: selection.length
       });
     });
-    this.el.addEventListener("contextmenu", event => {
-      event.preventDefault();
-      return false;
+    this.el.addEventListener("touchstart", event => {
+      if (event.touches.length == 1) {
+        const editor = this.findEditor(event);
+        if ((!editor) || (!editor.__row)) { return; }
+        this.touchState = {
+          editor,
+          position: event.touches[0]
+        };
+      } else {
+        if (!this.touchState) { return; }
+        const { editor, position } = this.touchState;
+        const selection = editor.__row.selection(editor.__type);
+        if (!selection) { return; }
+        const distance1 = Math.pow(position.pageX - event.touches[0].pageX, 2) +
+                          Math.pow(position.pageY - event.touches[0].pageY, 2);
+        const distance2 = Math.pow(position.pageX - event.touches[1].pageX, 2) +
+                          Math.pow(position.pageY - event.touches[1].pageY, 2);
+        const source = (distance1 < distance2) ? 0 : 1;
+        const target = (distance1 < distance2) ? 1 : 0;
+        const actionKey = (event.touches[source].pageY < event.touches[target].pageY) ? 1 : 2;
+        const action = ACTIONS[actionKey];
+
+        api.action({
+          action,
+          id: editor.__row.id,
+          type: editor.__type,
+          index: selection.index,
+          length: selection.length
+        });
+      }
     });
+    if (!IS_MOBILE) {
+      this.el.addEventListener("contextmenu", event => {
+        event.preventDefault();
+        return false;
+      });
+    }
     this.el.addEventListener("dragend", event => {
       const id = event.target.__id;
       if (!id) { return; }
