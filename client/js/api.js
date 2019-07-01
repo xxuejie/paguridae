@@ -1,6 +1,8 @@
 import { document, Quill } from "./externals.js";
 const Delta = Quill.import("delta");
 
+const LAYOUT_ID = 0;
+
 let nextColumnId = 1;
 
 export function columnId() {
@@ -24,13 +26,14 @@ class Layout {
     ];
   }
 
-  onchange(change) {
-    this.data = this.data.compose(new Delta(change));
+  update(changes) {
+    this.data = changes.reduce((data, change) => data.compose(new Delta(change.change)), this.data);
     const currentIds = this.data.filter(op => typeof op.insert === "string")
                            .map(op => op.insert)
                            .join("")
                            .split("\n")
-                           .map(line => parseInt(line, 10));
+                           .map(line => parseInt(line, 10))
+                           .filter(id => id > 0 && id % 2 !== 0);
     const oldIds = [].concat(...this.columns.map(column => column.rows.map(row => row.id)));
     const addedIds = currentIds.filter(id => !oldIds.includes(id));
     const deletedIds = oldIds.filter(id => !currentIds.includes(id));
@@ -128,22 +131,38 @@ export class Api {
 
   init(onchange) {
     this.onchange = onchange;
-    this.connection = new Connection(data => {
-      this.layout.onchange(data.layout);
-      this.onchange({
-        layout: {
-          columns: this.layout.columns,
-        },
-        rows: data.rows
-      });
+    this.connection = new Connection(changes => {
+      const layoutChanges = changes.filter(change => change.id === LAYOUT_ID);
+      const editorChanges = {
+        rows: changes.filter(change => change.id != LAYOUT_ID).map(({id, change}) => {
+          if (id % 2 === 0) {
+            return {
+              id: id - 1,
+              content: change
+            };
+          } else {
+            return {
+              id,
+              label: change
+            };
+          }
+        })
+      };
+      if (layoutChanges.length > 0) {
+        this.layout.update(layoutChanges);
+        editorChanges["layout"] = {
+          columns: this.layout.columns
+        };
+      }
+      this.onchange(editorChanges);
     });
     this.connection.connect();
   }
 
-  textchange(id, type, delta) {
+  textchange(id, delta) {
     this.rows[id] = this.rows[id] || { id: id };
-    this.rows[id][type] = this.rows[id][type] || new Delta();
-    this.rows[id][type] = this.rows[id][type].compose(delta);
+    this.rows[id].change = this.rows[id].change || new Delta();
+    this.rows[id].change = this.rows[id].change.compose(delta);
   }
 
   action(data) {

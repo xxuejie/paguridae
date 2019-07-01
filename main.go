@@ -13,30 +13,21 @@ import (
 
 // A row is just an editor window, we call it a row since in it you get
 // actually 2 editors: a label editor, and a content editor
-type Row struct {
-	Id      int          `json:"id"`
-	Label   *delta.Delta `json:"label,omitempty"`
-	Content *delta.Delta `json:"content,omitempty"`
+type Editor struct {
+	Id     int         `json:"id"`
+	Change delta.Delta `json:"change"`
 }
 
 type Action struct {
 	Id     int    `json:"id"`
 	Action string `json:"action"`
-	Type   string `json:"type"`
 	Index  int    `json:"index"`
 	Length int    `json:"length"`
 }
 
 type Request struct {
-	Rows   []Row  `json:"rows"`
-	Action Action `json:"action"`
-}
-
-// All deltas included in this struct(included nested ones) are optional,
-// if one is missing, it means no change is made on this part.
-type Change struct {
-	Layout *delta.Delta `json:"layout,omitempty"`
-	Rows   []Row        `json:"rows,omitempty"`
+	Changes []Editor `json:"rows"`
+	Action  Action   `json:"action"`
 }
 
 var port = flag.Int("port", 8000, "port to listen for http server")
@@ -51,27 +42,30 @@ func webSocketHandler(w http.ResponseWriter, req *http.Request) {
 	defer c.Close(websocket.StatusInternalError, "oops")
 	log.Print("Websocket connection established!")
 
-	initialChange := Change{
-		Layout: delta.New(nil).Insert("1\n2", nil),
-		Rows: []Row{
-			Row{
-				Id:      1,
-				Label:   delta.New(nil).Insert(" | New Newcol Cut Copy Paste", nil),
-				Content: delta.New(nil).Insert("Foobar\nLine 2\n\nAnotherLine", nil),
-			},
-			Row{
-				Id:      2,
-				Label:   delta.New(nil).Insert("~ | New Newcol Cut Copy Paste", nil),
-				Content: nil,
-			},
+	changes := []Editor{
+		Editor{
+			Id:     0,
+			Change: *delta.New(nil).Insert("1\n2\n3\n4", nil),
+		},
+		Editor{
+			Id:     1,
+			Change: *delta.New(nil).Insert(" | New Newcol Cut Copy Paste", nil),
+		},
+		Editor{
+			Id:     2,
+			Change: *delta.New(nil).Insert("Foobar\nLine 2\n\nAnotherLine", nil),
+		},
+		Editor{
+			Id:     3,
+			Change: *delta.New(nil).Insert("~ | New Newcol Cut Copy Paste", nil),
 		},
 	}
-	initialChangeBytes, err := json.Marshal(initialChange)
+	changesBytes, err := json.Marshal(changes)
 	if err != nil {
 		log.Print("Error marshaling json:", err)
 		return
 	}
-	err = c.Write(req.Context(), websocket.MessageText, initialChangeBytes)
+	err = c.Write(req.Context(), websocket.MessageText, changesBytes)
 	if err != nil {
 		log.Print("Error sending initial change:", err)
 		return

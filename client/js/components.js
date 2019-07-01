@@ -26,15 +26,15 @@ export class Window {
       const action = this.extractAction(event);
       if (!action) { return ;}
       const editor = this.findEditor(event);
-      if ((!editor) || (!editor.__row)) { return; }
-      this.mousedownSelection = editor.__row.selection(editor.__type);
+      if ((!editor) || (!editor.__quill)) { return; }
+      this.mousedownSelection = editor.__quill.getSelection();
     });
     this.el.addEventListener("mouseup", event => {
       const action = this.extractAction(event);
       if (!action) { return ;}
       const editor = this.findEditor(event);
-      if ((!editor) || (!editor.__row)) { return; }
-      const selection = editor.__row.selection(editor.__type);
+      if ((!editor) || (!editor.__quill)) { return; }
+      const selection = editor.__quill.getSelection();
       // When mouseup lands on a different editor from mousedown, selection
       // would return null.
       if (!selection) { return; }
@@ -56,8 +56,7 @@ export class Window {
 
       api.action({
         action,
-        id: editor.__row.id,
-        type: editor.__type,
+        id: editor.__id,
         index: selection.index,
         length: selection.length
       });
@@ -65,7 +64,7 @@ export class Window {
     this.el.addEventListener("touchstart", event => {
       if (event.touches.length == 1) {
         const editor = this.findEditor(event);
-        if ((!editor) || (!editor.__row)) { return; }
+        if ((!editor) || (!editor.__quill)) { return; }
         this.touchState = {
           editor,
           position: event.touches[0]
@@ -73,7 +72,7 @@ export class Window {
       } else {
         if (!this.touchState) { return; }
         const { editor, position } = this.touchState;
-        const selection = editor.__row.selection(editor.__type);
+        const selection = editor.__quill.getSelection();
         if (!selection) { return; }
         const distance1 = Math.pow(position.pageX - event.touches[0].pageX, 2) +
                           Math.pow(position.pageY - event.touches[0].pageY, 2);
@@ -86,8 +85,7 @@ export class Window {
 
         api.action({
           action,
-          id: editor.__row.id,
-          type: editor.__type,
+          id: editor.__id,
           index: selection.index,
           length: selection.length
         });
@@ -119,7 +117,7 @@ export class Window {
 
   findEditor(event) {
     let target = event.target;
-    while (target != this.el && (!target.__row) && target.parentElement) {
+    while (target != this.el && (!target.__quill) && target.parentElement) {
       target = target.parentElement;
     }
     return target;
@@ -173,31 +171,19 @@ export class Row {
 
     this.resizer.__id = this.id;
 
-    this.label.__row = this;
-    this.content.__row = this;
-
-    this.label.__type = "label";
-    this.content.__type = "content";
+    this.label.__id = id
+    this.content.__id = id + 1;
 
     this.labelEditor.on("text-change", (delta, _oldDelta, source) => {
       if (source === "user") {
-        api.textchange(id, "label", delta);
+        api.textchange(id, delta);
       }
     });
     this.contentEditor.on("text-change", (delta, _oldDelta, source) => {
       if (source === "user") {
-        api.textchange(id, "content", delta);
+        api.textchange(id, delta);
       }
     });
-  }
-
-  selection(type) {
-    if (type === "label") {
-      return this.labelEditor.getSelection();
-    } else if (type === "content") {
-      return this.contentEditor.getSelection();
-    }
-    return null;
   }
 
   update({height, label, content}) {
