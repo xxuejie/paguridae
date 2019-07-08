@@ -7,7 +7,7 @@ html, body, .view {
 
 .ql-container {
   font-family: Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace;
-  overflow: scroll;
+  overflow: hidden;
 }
 
 .ql-editor {
