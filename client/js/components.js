@@ -109,7 +109,7 @@ export class Window {
 
   extractAction(event) {
     let button = event.button;
-    if (button === 0 && event.altKey) {
+    if (button === 0 && event.ctrlKey) {
       button = 1;
     }
     return ACTIONS[button];
