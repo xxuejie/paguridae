@@ -11,9 +11,7 @@ import (
 	"nhooyr.io/websocket"
 )
 
-// A row is just an editor window, we call it a row since in it you get
-// actually 2 editors: a label editor, and a content editor
-type Editor struct {
+type Change struct {
 	Id     int         `json:"id"`
 	Change delta.Delta `json:"change"`
 }
@@ -26,7 +24,7 @@ type Action struct {
 }
 
 type Request struct {
-	Changes []Editor `json:"rows"`
+	Changes []Change `json:"rows"`
 	Action  Action   `json:"action"`
 }
 
@@ -42,20 +40,20 @@ func webSocketHandler(w http.ResponseWriter, req *http.Request) {
 	defer c.Close(websocket.StatusInternalError, "oops")
 	log.Print("Websocket connection established!")
 
-	changes := []Editor{
-		Editor{
+	changes := []Change{
+		Change{
 			Id:     0,
 			Change: *delta.New(nil).Insert("1\n2\n3\n4", nil),
 		},
-		Editor{
+		Change{
 			Id:     1,
 			Change: *delta.New(nil).Insert(" | New Newcol Cut Copy Paste", nil),
 		},
-		Editor{
+		Change{
 			Id:     2,
 			Change: *delta.New(nil).Insert("Foobar\nLine 2\n\nAnotherLine", nil),
 		},
-		Editor{
+		Change{
 			Id:     3,
 			Change: *delta.New(nil).Insert("~ | New Newcol Cut Copy Paste", nil),
 		},
