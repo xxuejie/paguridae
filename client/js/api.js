@@ -131,7 +131,8 @@ export class Api {
 
   init(onchange) {
     this.onchange = onchange;
-    this.connection = new Connection(changes => {
+    this.connection = new Connection(({acks, changes}) => {
+      /* TODO: deal with acks later */
       const layoutChanges = changes.filter(change => change.id === LAYOUT_ID);
       const editorChanges = {
         rows: changes.filter(change => change.id != LAYOUT_ID).map(({id, change}) => {
