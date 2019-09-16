@@ -9,6 +9,8 @@ github.com/google/go-cmp v0.2.0/go.mod h1:oXzfMopK8JAjlY9xF4vHSVASa0yLyX7SntLO5a
 github.com/kr/pretty v0.1.0/go.mod h1:dAy3ld7l9f0ibDNOQOHHMYYIIbhfbHSm3C4ZsoJORNo=
 github.com/kr/pty v1.1.1/go.mod h1:pFQYn66WHrOpPYNljwOMqo10TkYh1fy3cYio2l3bCsQ=
 github.com/kr/text v0.1.0/go.mod h1:4Jbv+DJW3UT/LiOwJeYQe1efqtUx/iVham/4vfdArNI=
+github.com/sergi/go-diff v1.0.0 h1:Kpca3qRNrduNnOQeazBd0ysaKrUJiIuISHxogkT9RPQ=
+github.com/sergi/go-diff v1.0.0/go.mod h1:0CfEIISq7TuYL3j771MWULgwwjU+GofnZX9QAmXWZgo=
 github.com/xxuejie/go-quilljs-delta v0.0.3-0.20190618061225-5233d7665e1d h1:4HKRQsGaIPDdVSgsvyWlz8DpXKYH1g+kvdo7bchNG90=
 github.com/xxuejie/go-quilljs-delta v0.0.3-0.20190618061225-5233d7665e1d/go.mod h1:gQpck5SnCB0KADj8eC70wesyi3mTYZOq+CShTS5lLgA=
 go.coder.com/go-tools v0.0.0-20190317003359-0c6a35b74a16/go.mod h1:iKV5yK9t+J5nG9O3uF6KYdPEz3dyfMyB15MN1rbQ8Qw=
