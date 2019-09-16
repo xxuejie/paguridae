@@ -14,10 +14,11 @@ import (
 )
 
 type File struct {
-	Id      int
-	Version int
-	Label   *delta.Delta
-	Content *delta.Delta
+	Id             int
+	LabelVersion   int
+	Label          *delta.Delta
+	ContentVersion int
+	Content        *delta.Delta
 }
 
 func (f *File) LabelId() int {
@@ -52,16 +53,18 @@ func NewConnection() (*Connection, error) {
 	}
 
 	file1 := &File{
-		Id:      1,
-		Version: 1,
-		Label:   delta.New(nil).Insert(" | New Newcol Cut Copy Paste", nil),
-		Content: delta.New(nil),
+		Id:             1,
+		LabelVersion:   1,
+		Label:          delta.New(nil).Insert(" | New Newcol Cut Copy Paste", nil),
+		ContentVersion: 1,
+		Content:        delta.New(nil),
 	}
 	file2 := &File{
-		Id:      3,
-		Version: 1,
-		Label:   delta.New(nil).Insert(currentPath, nil).Insert(" | New Newcol Cut Copy Paste", nil),
-		Content: delta.New(nil).Insert(out.String(), nil),
+		Id:             3,
+		LabelVersion:   1,
+		Label:          delta.New(nil).Insert(currentPath, nil).Insert(" | New Newcol Cut Copy Paste", nil),
+		ContentVersion: 1,
+		Content:        delta.New(nil).Insert(out.String(), nil),
 	}
 	connection := &Connection{
 		Files: []*File{
@@ -113,12 +116,12 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 	for _, file := range c.Files {
 		changes = append(changes, Change{
 			Id:      file.LabelId(),
-			Version: file.Version,
+			Version: file.LabelVersion,
 			Change:  *file.Label,
 		})
 		changes = append(changes, Change{
 			Id:      file.ContentId(),
-			Version: file.Version,
+			Version: file.ContentVersion,
 			Change:  *file.Content,
 		})
 	}
