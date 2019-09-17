@@ -27,7 +27,7 @@ class Layout {
   }
 
   update(changes) {
-    this.data = changes.reduce((data, change) => data.compose(new Delta(change.change)), this.data);
+    this.data = changes.reduce((data, change) => data.compose(new Delta(change.delta)), this.data);
     const currentIds = this.data.filter(op => typeof op.insert === "string")
                            .map(op => op.insert)
                            .join("")
@@ -164,8 +164,8 @@ export class Api {
       console.log("Version mismatch, something is wrong!");
       return;
     }
-    this.buffered_changes[id].change = this.buffered_changes[id].change || new Delta();
-    this.buffered_changes[id].change = this.buffered_changes[id].change.compose(delta);
+    this.buffered_changes[id].delta = this.buffered_changes[id].delta || new Delta();
+    this.buffered_changes[id].delta = this.buffered_changes[id].delta.compose(delta);
   }
 
   action(data) {

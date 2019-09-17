@@ -151,7 +151,7 @@ export class Window {
         const id = change.id - 1 + change.id % 2;
         const row = lookup[id];
         if (row) {
-          row.update({ editorChange: change });
+          row.update({ change });
         }
       });
     }
@@ -190,22 +190,22 @@ export class Row {
     });
   }
 
-  update({height, editorChange}) {
+  update({height, change}) {
     if (height) {
       setStyle(this.el, {height: `${height}%`});
     }
-    if (editorChange) {
-      const {id, change, version} = editorChange;
+    if (change) {
+      const {id, delta, version} = change;
       if (id === this.label.__id) {
-        if (change) {
-          this.labelEditor.updateContents(new Delta(change));
+        if (delta) {
+          this.labelEditor.updateContents(new Delta(delta));
         }
         if (version && version > this.label.__version) {
           this.label.__version = version;
         }
       } else if (id === this.content.__id) {
-        if (change) {
-          this.contentEditor.updateContents(new Delta(change));
+        if (delta) {
+          this.contentEditor.updateContents(new Delta(delta));
         }
         if (version && version > this.content.__version) {
           this.content.__version = version;

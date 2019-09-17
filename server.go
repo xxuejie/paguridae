@@ -76,7 +76,7 @@ func NewConnection() (*Connection, error) {
 
 type Change struct {
 	Id      int         `json:"id"`
-	Change  delta.Delta `json:"change"`
+	Delta   delta.Delta `json:"delta"`
 	Version int         `json:"version"`
 }
 
@@ -93,9 +93,10 @@ type Request struct {
 }
 
 type Ack struct {
-	Id         int `json:"id"`
-	AckVersion int `json:"ack_version"`
-	Version    int `json:"version"`
+	Id         int         `json:"id"`
+	Delta      delta.Delta `json:"delta"`
+	AckVersion int         `json:"ack_version"`
+	Version    int         `json:"version"`
 }
 
 type Update struct {
@@ -112,18 +113,18 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 	changes = append(changes, Change{
 		Id:      0,
 		Version: 1,
-		Change:  *idDelta,
+		Delta:   *idDelta,
 	})
 	for _, file := range c.Files {
 		changes = append(changes, Change{
 			Id:      file.LabelId(),
 			Version: file.LabelVersion,
-			Change:  *file.Label,
+			Delta:   *file.Label,
 		})
 		changes = append(changes, Change{
 			Id:      file.ContentId(),
 			Version: file.ContentVersion,
-			Change:  *file.Content,
+			Delta:   *file.Content,
 		})
 	}
 	updateBytes, err := json.Marshal(Update{
@@ -181,7 +182,7 @@ func (c *Connection) applyChanges(changes []Change) []Ack {
 					log.Println("Invalid file version!")
 					continue
 				}
-				file.Label = file.Label.Compose(change.Change)
+				file.Label = file.Label.Compose(change.Delta)
 				file.LabelVersion += 1
 				version = file.LabelVersion
 			}
@@ -190,15 +191,16 @@ func (c *Connection) applyChanges(changes []Change) []Ack {
 					log.Println("Invalid file version!")
 					continue
 				}
-				file.Content = file.Content.Compose(change.Change)
+				file.Content = file.Content.Compose(change.Delta)
 				file.ContentVersion += 1
 				version = file.ContentVersion
 			}
 			if version != 0 {
 				acks = append(acks, Ack{
 					Id:         change.Id,
-					Version:    version,
+					Delta:      change.Delta,
 					AckVersion: change.Version,
+					Version:    version,
 				})
 				break
 			}
