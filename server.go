@@ -55,14 +55,14 @@ func NewConnection() (*Connection, error) {
 	file1 := &File{
 		Id:             1,
 		LabelVersion:   1,
-		Label:          delta.New(nil).Insert(" | New Newcol Cut Copy Paste", nil),
+		Label:          delta.New(nil).Insert(" | New Newcol Cut Copy Paste Put", nil),
 		ContentVersion: 1,
 		Content:        delta.New(nil),
 	}
 	file2 := &File{
 		Id:             3,
 		LabelVersion:   1,
-		Label:          delta.New(nil).Insert(currentPath, nil).Insert(" | New Newcol Cut Copy Paste", nil),
+		Label:          delta.New(nil).Insert(currentPath, nil).Insert(" | New Newcol Cut Copy Paste Put", nil),
 		ContentVersion: 1,
 		Content:        delta.New(nil).Insert(out.String(), nil),
 	}
@@ -142,7 +142,7 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 		if err != nil {
 			return err
 		}
-		log.Print("Message: ", string(b))
+		// log.Print("Message: ", string(b))
 		var request Request
 		err = json.Unmarshal(b, &request)
 		if err != nil {
@@ -150,6 +150,46 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 			continue
 		}
 
-		log.Print("Request:", request)
+		acks := c.applyChanges(request.Changes)
+		// TODO: handle action
+		log.Print("Request action:", request.Action)
+
+		updateBytes, err := json.Marshal(Update{
+			Changes: []Change{},
+			Acks:    acks,
+		})
+		if err != nil {
+			return err
+		}
+		err = socketConn.Write(ctx, websocket.MessageText, updateBytes)
+		if err != nil {
+			return err
+		}
 	}
+}
+
+func (c *Connection) applyChanges(changes []Change) []Ack {
+	acks := make([]Ack, 0)
+	for _, change := range changes {
+		for _, file := range c.Files {
+			applied := false
+			// TODO: version testing and OT transform when needed.
+			if file.LabelId() == change.Id {
+				file.Label = file.Label.Compose(change.Change)
+				applied = true
+			}
+			if file.ContentId() == change.Id {
+				file.Content = file.Content.Compose(change.Change)
+				applied = true
+			}
+			if applied {
+				acks = append(acks, Ack{
+					Id:      change.Id,
+					Version: change.Version,
+				})
+				break
+			}
+		}
+	}
+	return acks
 }

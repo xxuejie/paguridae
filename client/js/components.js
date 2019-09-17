@@ -181,7 +181,7 @@ export class Row {
     });
     this.contentEditor.on("text-change", (delta, _oldDelta, source) => {
       if (source === "user") {
-        api.textchange(id, delta);
+        api.textchange(id + 1, delta);
       }
     });
   }
