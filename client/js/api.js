@@ -126,17 +126,27 @@ class Connection {
 export class Api {
   constructor() {
     this.layout = new Layout();
-    this.rows = {};
+    this.buffered_changes = {};
+    this.inflight_changes = [];
   }
 
   init(onchange) {
     this.onchange = onchange;
     this.connection = new Connection(({acks, changes}) => {
-      /* TODO: deal with acks later */
-      const layoutChanges = changes.filter(change => change.id === LAYOUT_ID);
+      const ackChanges = []
+      acks.forEach(({ id, ack_version, version }) => {
+        ackChanges.push({ id, version });
+        this.inflight_changes = this.inflight_changes.filter(c => c.id !== id || c.version !== ack_version);
+      });
+      /*
+       * TODO: when there's buffered changes, do necessary
+       * transforms and version updates.
+       */
+      const textChanges = changes.filter(change => change.id != LAYOUT_ID)
       const editorChanges = {
-        rows: changes.filter(change => change.id != LAYOUT_ID)
+        rows: ackChanges.concat(textChanges)
       };
+      const layoutChanges = changes.filter(change => change.id === LAYOUT_ID);
       if (layoutChanges.length > 0) {
         this.layout.update(layoutChanges);
         editorChanges["layout"] = {
@@ -148,17 +158,22 @@ export class Api {
     this.connection.connect();
   }
 
-  textchange(id, delta) {
-    this.rows[id] = this.rows[id] || { id: id };
-    this.rows[id].change = this.rows[id].change || new Delta();
-    this.rows[id].change = this.rows[id].change.compose(delta);
+  textchange(id, delta, version) {
+    this.buffered_changes[id] = this.buffered_changes[id] || { id: id, version: version };
+    if (this.buffered_changes[id].version !== version) {
+      console.log("Version mismatch, something is wrong!");
+      return;
+    }
+    this.buffered_changes[id].change = this.buffered_changes[id].change || new Delta();
+    this.buffered_changes[id].change = this.buffered_changes[id].change.compose(delta);
   }
 
   action(data) {
-    const rows = Object.values(this.rows);
-    this.rows = {};
+    const buffered_changes = Object.values(this.buffered_changes);
+    this.buffered_changes = {};
+    this.inflight_changes = this.inflight_changes.concat(buffered_changes);
     this.connection.send({
-      rows,
+      changes: buffered_changes,
       action: data
     });
   }

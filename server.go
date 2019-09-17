@@ -88,13 +88,14 @@ type Action struct {
 }
 
 type Request struct {
-	Changes []Change `json:"rows"`
+	Changes []Change `json:"changes"`
 	Action  Action   `json:"action"`
 }
 
 type Ack struct {
-	Id      int `json:"id"`
-	Version int `json:"version"`
+	Id         int `json:"id"`
+	AckVersion int `json:"ack_version"`
+	Version    int `json:"version"`
 }
 
 type Update struct {
@@ -172,20 +173,23 @@ func (c *Connection) applyChanges(changes []Change) []Ack {
 	acks := make([]Ack, 0)
 	for _, change := range changes {
 		for _, file := range c.Files {
-			applied := false
+			version := 0
 			// TODO: version testing and OT transform when needed.
 			if file.LabelId() == change.Id {
 				file.Label = file.Label.Compose(change.Change)
-				applied = true
+				file.LabelVersion += 1
+				version = file.LabelVersion
 			}
 			if file.ContentId() == change.Id {
 				file.Content = file.Content.Compose(change.Change)
-				applied = true
+				file.ContentVersion += 1
+				version = file.ContentVersion
 			}
-			if applied {
+			if version != 0 {
 				acks = append(acks, Ack{
-					Id:      change.Id,
-					Version: change.Version,
+					Id:         change.Id,
+					Version:    version,
+					AckVersion: change.Version,
 				})
 				break
 			}

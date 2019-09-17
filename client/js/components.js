@@ -175,14 +175,17 @@ export class Row {
     this.label.__id = id
     this.content.__id = id + 1;
 
+    this.label.__version = 0;
+    this.content.__version = 0;
+
     this.labelEditor.on("text-change", (delta, _oldDelta, source) => {
       if (source === "user") {
-        api.textchange(this.label.__id, delta);
+        api.textchange(this.label.__id, delta, this.label.__version);
       }
     });
     this.contentEditor.on("text-change", (delta, _oldDelta, source) => {
       if (source === "user") {
-        api.textchange(this.content.__id, delta);
+        api.textchange(this.content.__id, delta, this.content.__version);
       }
     });
   }
@@ -194,11 +197,19 @@ export class Row {
     if (editorChange) {
       const {id, change, version} = editorChange;
       if (id === this.label.__id) {
-        this.labelEditor.updateContents(new Delta(change));
-        this.labelVersion = version;
+        if (change) {
+          this.labelEditor.updateContents(new Delta(change));
+        }
+        if (version && version > this.label.__version) {
+          this.label.__version = version;
+        }
       } else if (id === this.content.__id) {
-        this.contentEditor.updateContents(new Delta(change));
-        this.contentVersion = version;
+        if (change) {
+          this.contentEditor.updateContents(new Delta(change));
+        }
+        if (version && version > this.content.__version) {
+          this.content.__version = version;
+        }
       }
     }
   }
