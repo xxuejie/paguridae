@@ -1,4 +1,4 @@
-import { document, Quill } from "./externals.js";
+import { _, document, Quill } from "./externals.js";
 const Delta = Quill.import("delta");
 
 const LAYOUT_ID = 0;
@@ -134,9 +134,12 @@ export class Api {
     this.onchange = onchange;
     this.connection = new Connection(({acks, changes}) => {
       const ackChanges = []
-      acks.forEach(({ id, ack_version, version }) => {
+      acks.forEach(({ id, ack_version, version, delta }) => {
         ackChanges.push({ id, version });
-        this.inflight_changes = this.inflight_changes.filter(c => c.id !== id || c.version !== ack_version);
+        this.inflight_changes = this.inflight_changes.filter(
+          c => c.id !== id ||
+             c.version !== ack_version ||
+             (!_.isEqual(c.delta, new Delta(delta))));
       });
       /*
        * TODO: when there's buffered changes, do necessary
