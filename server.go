@@ -174,13 +174,22 @@ func (c *Connection) applyChanges(changes []Change) []Ack {
 	for _, change := range changes {
 		for _, file := range c.Files {
 			version := 0
-			// TODO: version testing and OT transform when needed.
+			// TODO: version testing and OT transform when needed,
+			// right now we just simply deny unmatched versions.
 			if file.LabelId() == change.Id {
+				if change.Version != file.LabelVersion {
+					log.Println("Invalid file version!")
+					continue
+				}
 				file.Label = file.Label.Compose(change.Change)
 				file.LabelVersion += 1
 				version = file.LabelVersion
 			}
 			if file.ContentId() == change.Id {
+				if change.Version != file.ContentVersion {
+					log.Println("Invalid file version!")
+					continue
+				}
 				file.Content = file.Content.Compose(change.Change)
 				file.ContentVersion += 1
 				version = file.ContentVersion
