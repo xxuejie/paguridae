@@ -148,9 +148,10 @@ export class Window {
     if (rows) {
       const { lookup } = this.rows;
       rows.forEach(function(change) {
-        const row = lookup[change.id];
+        const id = change.id - 1 + change.id % 2;
+        const row = lookup[id];
         if (row) {
-          row.update(change);
+          row.update({ editorChange: change });
         }
       });
     }
@@ -176,25 +177,29 @@ export class Row {
 
     this.labelEditor.on("text-change", (delta, _oldDelta, source) => {
       if (source === "user") {
-        api.textchange(id, delta);
+        api.textchange(this.label.__id, delta);
       }
     });
     this.contentEditor.on("text-change", (delta, _oldDelta, source) => {
       if (source === "user") {
-        api.textchange(id + 1, delta);
+        api.textchange(this.content.__id, delta);
       }
     });
   }
 
-  update({height, label, content}) {
+  update({height, editorChange}) {
     if (height) {
       setStyle(this.el, {height: `${height}%`});
     }
-    if (label) {
-      this.labelEditor.updateContents(new Delta(label));
-    }
-    if (content) {
-      this.contentEditor.updateContents(new Delta(content));
+    if (editorChange) {
+      const {id, change, version} = editorChange;
+      if (id === this.label.__id) {
+        this.labelEditor.updateContents(new Delta(change));
+        this.labelVersion = version;
+      } else if (id === this.content.__id) {
+        this.contentEditor.updateContents(new Delta(change));
+        this.contentVersion = version;
+      }
     }
   }
 }

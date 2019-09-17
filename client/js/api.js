@@ -135,19 +135,7 @@ export class Api {
       /* TODO: deal with acks later */
       const layoutChanges = changes.filter(change => change.id === LAYOUT_ID);
       const editorChanges = {
-        rows: changes.filter(change => change.id != LAYOUT_ID).map(({id, change}) => {
-          if (id % 2 === 0) {
-            return {
-              id: id - 1,
-              content: change
-            };
-          } else {
-            return {
-              id,
-              label: change
-            };
-          }
-        })
+        rows: changes.filter(change => change.id != LAYOUT_ID)
       };
       if (layoutChanges.length > 0) {
         this.layout.update(layoutChanges);
