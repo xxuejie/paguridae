@@ -127,20 +127,24 @@ export class Api {
   constructor() {
     this.layout = new Layout();
     this.buffered_changes = {};
-    this.inflight_changes = [];
+    this.inflight_changes = null;
   }
 
   init(onchange) {
     this.onchange = onchange;
     this.connection = new Connection(({acks, changes}) => {
-      const ackChanges = []
-      acks.forEach(({ id, ack_version, version, delta }) => {
-        ackChanges.push({ id, version });
-        this.inflight_changes = this.inflight_changes.filter(
-          c => c.id !== id ||
-             c.version !== ack_version ||
-             (!_.isEqual(c.delta, new Delta(delta))));
-      });
+      const ackChanges = [];
+      if (acks) {
+        acks.forEach(({ id, version }) => {
+          ackChanges.push({ id, version });
+          this.inflight_changes = this.inflight_changes.filter(c => c.id !== id);
+        });
+        if (this.inflight_changes.length > 0) {
+          console.log("Inflight changes not cleared:", this.inflight_changes, "Maybe something is wrong?");
+        }
+        this.inflight_changes = null;
+      }
+      changes = changes || [];
       /*
        * TODO: when there's buffered changes, do necessary
        * transforms and version updates.
@@ -172,13 +176,18 @@ export class Api {
   }
 
   action(data) {
+    if (this.inflight_changes) {
+      console.log("Action inflight, skipping!");
+      return;
+    }
+    const payload = { action: data };
     const buffered_changes = Object.values(this.buffered_changes);
     this.buffered_changes = {};
-    this.inflight_changes = this.inflight_changes.concat(buffered_changes);
-    this.connection.send({
-      changes: buffered_changes,
-      action: data
-    });
+    if (buffered_changes.length > 0) {
+      this.inflight_changes = buffered_changes;
+      payload.changes = buffered_changes;
+    }
+    this.connection.send(payload);
   }
 
   move({id, x, y}) {

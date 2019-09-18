@@ -93,15 +93,14 @@ type Request struct {
 }
 
 type Ack struct {
-	Id         int         `json:"id"`
-	Delta      delta.Delta `json:"delta"`
-	AckVersion int         `json:"ack_version"`
-	Version    int         `json:"version"`
+	Id int `json:"id"`
+	// New version
+	Version int `json:"version"`
 }
 
 type Update struct {
-	Changes []Change `json:"changes"`
-	Acks    []Ack    `json:"acks"`
+	Changes []Change `json:"changes,omitempty"`
+	Acks    []Ack    `json:"acks,omitempty"`
 }
 
 func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) error {
@@ -197,10 +196,8 @@ func (c *Connection) applyChanges(changes []Change) []Ack {
 			}
 			if version != 0 {
 				acks = append(acks, Ack{
-					Id:         change.Id,
-					Delta:      change.Delta,
-					AckVersion: change.Version,
-					Version:    version,
+					Id:      change.Id,
+					Version: version,
 				})
 				break
 			}
