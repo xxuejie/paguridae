@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"github.com/fmpwizard/go-quilljs-delta/delta"
@@ -31,6 +32,32 @@ func (f *File) ContentId() int {
 
 func (f *File) IdDelta() *delta.Delta {
 	return delta.New(nil).Insert(fmt.Sprintf("%d\n%d\n", f.LabelId(), f.ContentId()), nil)
+}
+
+const (
+	ExtractSelectionLength = 256
+)
+
+func (f *File) ExtractSelection(action Action) string {
+	var delta *delta.Delta
+	if action.Id == f.LabelId() {
+		delta = f.Label
+	} else {
+		delta = f.Content
+	}
+	if action.Length > 0 {
+		return DeltaToString(*delta.Slice(action.Index, action.Index+action.Length))
+	} else {
+		start := action.Index - ExtractSelectionLength
+		if start < 0 {
+			start = 0
+		}
+		firstHalf := DeltaToString(*delta.Slice(start, action.Index))
+		secondHalf := DeltaToString(*delta.Slice(action.Index, action.Index+ExtractSelectionLength))
+		firstHalfMatch := regexp.MustCompile(`\S+$`).FindString(firstHalf)
+		secondHalfMatch := regexp.MustCompile(`^\S+`).FindString(secondHalf)
+		return strings.Join([]string{firstHalfMatch, secondHalfMatch}, "")
+	}
 }
 
 type Connection struct {
@@ -85,6 +112,10 @@ type Action struct {
 	Action string `json:"action"`
 	Index  int    `json:"index"`
 	Length int    `json:"length"`
+}
+
+func (a Action) FileId() int {
+	return a.Id - 1 + a.Id%2
 }
 
 type Request struct {
@@ -152,8 +183,15 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 		}
 
 		acks := c.applyChanges(request.Changes)
-		// TODO: handle action
-		log.Print("Request action:", request.Action)
+		file := c.findFile(request.Action)
+		if file != nil {
+			selection := file.ExtractSelection(request.Action)
+			log.Println("Action: ", request.Action.Action,
+				" selection: ", string(selection),
+				" file ID: ", request.Action.FileId())
+		} else {
+			log.Print("Cannot find file for action: ", request.Action.Id)
+		}
 
 		updateBytes, err := json.Marshal(Update{
 			Changes: []Change{},
@@ -167,6 +205,15 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 			return err
 		}
 	}
+}
+
+func (c *Connection) findFile(action Action) *File {
+	for _, file := range c.Files {
+		if action.FileId() == file.Id {
+			return file
+		}
+	}
+	return nil
 }
 
 func (c *Connection) applyChanges(changes []Change) []Ack {

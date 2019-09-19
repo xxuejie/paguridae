@@ -5,21 +5,21 @@ import (
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
-func DeltaToRunes(d delta.Delta) []rune {
+func DeltaToString(d delta.Delta) string {
 	result := make([]rune, 0)
 	for _, op := range d.Ops {
 		if op.Insert != nil {
 			result = append(result, op.Insert...)
 		}
 	}
-	return result
+	return string(result)
 }
 
 func Diff(old delta.Delta, new delta.Delta) *delta.Delta {
-	oldRunes := DeltaToRunes(old)
-	newRunes := DeltaToRunes(new)
+	oldString := DeltaToString(old)
+	newString := DeltaToString(new)
 	result := delta.New(nil)
-	diffs := diffmatchpatch.New().DiffMainRunes(oldRunes, newRunes, false)
+	diffs := diffmatchpatch.New().DiffMain(oldString, newString, false)
 	for _, diff := range diffs {
 		switch diff.Type {
 		case diffmatchpatch.DiffDelete:
