@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -60,6 +61,31 @@ func (f *File) ExtractSelection(action Action) string {
 	}
 }
 
+func (f *File) ApplyChange(change Change) (*Ack, error) {
+	version := 0
+	if change.Id == f.LabelId() {
+		// TODO: version testing and OT transform when needed,
+		// right now we just simply deny unmatched versions.
+		if change.Version != f.LabelVersion {
+			return nil, errors.New("Invalid file label version!")
+		}
+		f.Label = f.Label.Compose(change.Delta)
+		f.LabelVersion += 1
+		version = f.LabelVersion
+	} else {
+		if change.Version != f.ContentVersion {
+			return nil, errors.New("Invalid file content version!")
+		}
+		f.Content = f.Content.Compose(change.Delta)
+		f.ContentVersion += 1
+		version = f.ContentVersion
+	}
+	return &Ack{
+		Id:      change.Id,
+		Version: version,
+	}, nil
+}
+
 type Connection struct {
 	Files []*File
 }
@@ -105,6 +131,10 @@ type Change struct {
 	Id      int         `json:"id"`
 	Delta   delta.Delta `json:"delta"`
 	Version int         `json:"version"`
+}
+
+func (c Change) FileId() int {
+	return c.Id - 1 + c.Id%2
 }
 
 type Action struct {
@@ -220,32 +250,13 @@ func (c *Connection) applyChanges(changes []Change) []Ack {
 	acks := make([]Ack, 0)
 	for _, change := range changes {
 		for _, file := range c.Files {
-			version := 0
-			// TODO: version testing and OT transform when needed,
-			// right now we just simply deny unmatched versions.
-			if file.LabelId() == change.Id {
-				if change.Version != file.LabelVersion {
-					log.Println("Invalid file version!")
-					continue
+			if change.FileId() == file.Id {
+				ack, err := file.ApplyChange(change)
+				if err != nil {
+					log.Println("Applying change error: ", err)
+				} else {
+					acks = append(acks, *ack)
 				}
-				file.Label = file.Label.Compose(change.Delta)
-				file.LabelVersion += 1
-				version = file.LabelVersion
-			}
-			if file.ContentId() == change.Id {
-				if change.Version != file.ContentVersion {
-					log.Println("Invalid file version!")
-					continue
-				}
-				file.Content = file.Content.Compose(change.Delta)
-				file.ContentVersion += 1
-				version = file.ContentVersion
-			}
-			if version != 0 {
-				acks = append(acks, Ack{
-					Id:      change.Id,
-					Version: version,
-				})
 				break
 			}
 		}
