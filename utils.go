@@ -6,20 +6,24 @@ import (
 )
 
 func DeltaToString(d delta.Delta) string {
+	return string(DeltaToRunes(d))
+}
+
+func DeltaToRunes(d delta.Delta) []rune {
 	result := make([]rune, 0)
 	for _, op := range d.Ops {
 		if op.Insert != nil {
 			result = append(result, op.Insert...)
 		}
 	}
-	return string(result)
+	return result
 }
 
 func Diff(old delta.Delta, new delta.Delta) *delta.Delta {
-	oldString := DeltaToString(old)
-	newString := DeltaToString(new)
+	oldRunes := DeltaToRunes(old)
+	newRunes := DeltaToRunes(new)
 	result := delta.New(nil)
-	diffs := diffmatchpatch.New().DiffMain(oldString, newString, false)
+	diffs := diffmatchpatch.New().DiffMainRunes(oldRunes, newRunes, false)
 	for _, diff := range diffs {
 		switch diff.Type {
 		case diffmatchpatch.DiffDelete:
