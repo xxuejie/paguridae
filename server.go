@@ -93,6 +93,21 @@ func (f *File) ApplyChange(change Change) (*Ack, error) {
 	}, nil
 }
 
+func (f *File) FullDeltas() []Change {
+	return []Change{
+		Change{
+			Id:      f.LabelId(),
+			Version: f.LabelVersion,
+			Delta:   *f.Label,
+		},
+		Change{
+			Id:      f.ContentId(),
+			Version: f.ContentVersion,
+			Delta:   *f.Content,
+		},
+	}
+}
+
 func NewDummyFile(id int) File {
 	return File{
 		Id:             id,
@@ -186,16 +201,7 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 	changes := make([]Change, 0)
 	changes = append(changes, c.appendFiles(&file1, file2))
 	for _, file := range c.Files {
-		changes = append(changes, Change{
-			Id:      file.LabelId(),
-			Version: file.LabelVersion,
-			Delta:   *file.Label,
-		})
-		changes = append(changes, Change{
-			Id:      file.ContentId(),
-			Version: file.ContentVersion,
-			Delta:   *file.Content,
-		})
+		changes = append(changes, file.FullDeltas()...)
 	}
 	updateBytes, err := json.Marshal(Update{
 		Changes: changes,
@@ -329,15 +335,8 @@ func (c *Connection) execute(command command) ([]Change, error) {
 			return nil, err
 		}
 		changes := make([]Change, 0)
-		changes = append(changes, c.appendFiles(f), Change{
-			Id:      f.LabelId(),
-			Version: f.LabelVersion,
-			Delta:   *f.Label,
-		}, Change{
-			Id:      f.ContentId(),
-			Version: f.ContentVersion,
-			Delta:   *f.Content,
-		})
+		changes = append(changes, c.appendFiles(f))
+		changes = append(changes, f.FullDeltas()...)
 		return changes, nil
 	} else {
 		return nil, errors.New(fmt.Sprint("Unknown command:", command))
