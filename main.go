@@ -21,12 +21,7 @@ func webSocketHandler(w http.ResponseWriter, req *http.Request) {
 	defer c.Close(websocket.StatusInternalError, "oops")
 	log.Print("Websocket connection established!")
 
-	connection, err := NewConnection()
-	if err != nil {
-		log.Print("Error creating connection:", err)
-		return
-	}
-	err = connection.Serve(req.Context(), c)
+	err = NewConnection().Serve(req.Context(), c)
 	if err != nil {
 		log.Print("Error serving connection:", err)
 		return

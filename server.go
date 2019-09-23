@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -17,7 +19,7 @@ import (
 
 const (
 	ExtractSelectionLength = 256
-	DefaultLabel = " | New Newcol Cut Copy Paste Put"
+	DefaultLabel           = " | New Newcol Cut Copy Paste Put"
 )
 
 type File struct {
@@ -40,6 +42,10 @@ func (f *File) IdDelta() *delta.Delta {
 	return delta.New(nil).Insert(fmt.Sprintf("%d\n%d\n", f.LabelId(), f.ContentId()), nil)
 }
 
+func (f *File) Path() string {
+	return strings.SplitN(DeltaToString(*f.Label), " ", 2)[0]
+}
+
 func (f *File) ExtractSelection(action Action) string {
 	var delta *delta.Delta
 	if action.Id == f.LabelId() {
@@ -58,7 +64,7 @@ func (f *File) ExtractSelection(action Action) string {
 		secondHalf := DeltaToString(*delta.Slice(action.Index, action.Index+ExtractSelectionLength))
 		firstHalfMatch := regexp.MustCompile(`\S+$`).FindString(firstHalf)
 		secondHalfMatch := regexp.MustCompile(`^\S+`).FindString(secondHalf)
-		return strings.Join([]string{firstHalfMatch, secondHalfMatch}, "")
+		return firstHalfMatch + secondHalfMatch
 	}
 }
 
@@ -89,15 +95,40 @@ func (f *File) ApplyChange(change Change) (*Ack, error) {
 
 func NewDummyFile(id int) File {
 	return File{
-		Id: id,
-		LabelVersion: 1,
-		Label: delta.New(nil).Insert(DefaultLabel, nil),
+		Id:             id,
+		LabelVersion:   1,
+		Label:          delta.New(nil).Insert(DefaultLabel, nil),
 		ContentVersion: 1,
-		Content: delta.New(nil),
+		Content:        delta.New(nil),
 	}
 }
 
+func NewOpenedFile(id int, path string) (*File, error) {
+	// TODO: partial read for larger files
+	stat, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if stat.Size() > 128*1024 {
+		return nil, errors.New("File too large!")
+	}
+	content, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return &File{
+		Id:             id,
+		LabelVersion:   1,
+		Label:          delta.New(nil).Insert(fmt.Sprintf("%s%s", path, DefaultLabel), nil),
+		ContentVersion: 1,
+		Content:        delta.New(nil).Insert(string(content), nil),
+	}, nil
+}
+
 func NewDirectoryFile(id int, path string) (*File, error) {
+	if !strings.HasSuffix(path, "/") {
+		path += "/"
+	}
 	cmd := exec.Command("ls", "-F", path)
 	var out strings.Builder
 	cmd.Stdout = &out
@@ -106,17 +137,24 @@ func NewDirectoryFile(id int, path string) (*File, error) {
 		return nil, err
 	}
 	return &File{
-		Id: id,
-		LabelVersion: 1,
-		Label: delta.New(nil).Insert(fmt.Sprintf("%s%s", path, DefaultLabel), nil),
+		Id:             id,
+		LabelVersion:   1,
+		Label:          delta.New(nil).Insert(fmt.Sprintf("%s%s", path, DefaultLabel), nil),
 		ContentVersion: 1,
-		Content: delta.New(nil).Insert(out.String(), nil),
+		Content:        delta.New(nil).Insert(out.String(), nil),
 	}, nil
 }
 
+type command struct {
+	action    Action
+	file      *File
+	selection string
+}
+
 type Connection struct {
-	Files []*File
-	NextId int
+	Files          []*File
+	IdDeltaVersion int
+	NextId         int
 }
 
 func (c *Connection) nextId() int {
@@ -125,37 +163,28 @@ func (c *Connection) nextId() int {
 	return i
 }
 
-func NewConnection() (*Connection, error) {
-	c := &Connection{
-		Files: make([]*File, 0),
-		NextId: 1,
+func NewConnection() *Connection {
+	return &Connection{
+		Files:          make([]*File, 0),
+		IdDeltaVersion: 0,
+		NextId:         1,
 	}
+}
+
+func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) error {
 	// A new connection has 2 files: an empty one, and one showing
 	// contents from current directory
 	file1 := NewDummyFile(c.nextId())
 	currentPath, err := os.Getwd()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	file2, err := NewDirectoryFile(c.nextId(), currentPath)
 	if err != nil {
-		return nil, err
-	}
-	c.Files = append(c.Files, &file1, file2)
-	return c, nil
-}
-
-func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) error {
-	idDelta := delta.New(nil)
-	for _, file := range c.Files {
-		idDelta = idDelta.Concat(*file.IdDelta())
+		return err
 	}
 	changes := make([]Change, 0)
-	changes = append(changes, Change{
-		Id:      0,
-		Version: 1,
-		Delta:   *idDelta,
-	})
+	changes = append(changes, c.appendFiles(&file1, file2))
 	for _, file := range c.Files {
 		changes = append(changes, Change{
 			Id:      file.LabelId(),
@@ -193,19 +222,27 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 			continue
 		}
 
+		var changes = make([]Change, 0)
 		acks := c.applyChanges(request.Changes)
 		file := c.findFile(request.Action)
 		if file != nil {
 			selection := file.ExtractSelection(request.Action)
-			log.Println("Action: ", request.Action.Action,
-				" selection: ", string(selection),
-				" file ID: ", request.Action.FileId())
+			executeChanges, err := c.execute(command{
+				action:    request.Action,
+				file:      file,
+				selection: selection,
+			})
+			if err != nil {
+				log.Print("Error executing command:", err)
+			} else {
+				changes = append(changes, executeChanges...)
+			}
 		} else {
 			log.Print("Cannot find file for action: ", request.Action.Id)
 		}
 
 		updateBytes, err := json.Marshal(Update{
-			Changes: []Change{},
+			Changes: changes,
 			Acks:    acks,
 		})
 		if err != nil {
@@ -216,6 +253,27 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 			return err
 		}
 	}
+}
+
+func (c *Connection) appendFiles(files ...*File) Change {
+	oldDelta := c.idDelta()
+	c.Files = append(c.Files, files...)
+	newDelta := c.idDelta()
+	d := Diff(*oldDelta, *newDelta)
+	c.IdDeltaVersion += 1
+	return Change{
+		Id:      0,
+		Version: c.IdDeltaVersion,
+		Delta:   *d,
+	}
+}
+
+func (c *Connection) idDelta() *delta.Delta {
+	d := delta.New(nil)
+	for _, file := range c.Files {
+		d = d.Concat(*file.IdDelta())
+	}
+	return d
 }
 
 func (c *Connection) findFile(action Action) *File {
@@ -243,4 +301,45 @@ func (c *Connection) applyChanges(changes []Change) []Ack {
 		}
 	}
 	return acks
+}
+
+func (c *Connection) execute(command command) ([]Change, error) {
+	if command.action.Action == "search" {
+		path := command.file.Path()
+		if !strings.HasSuffix(path, "/") {
+			path += "/../"
+		}
+		path += command.selection
+		path = filepath.Clean(path)
+		stat, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, nil
+			} else {
+				return nil, err
+			}
+		}
+		var f *File
+		if stat.IsDir() {
+			f, err = NewDirectoryFile(c.nextId(), path)
+		} else {
+			f, err = NewOpenedFile(c.nextId(), path)
+		}
+		if err != nil {
+			return nil, err
+		}
+		changes := make([]Change, 0)
+		changes = append(changes, c.appendFiles(f), Change{
+			Id:      f.LabelId(),
+			Version: f.LabelVersion,
+			Delta:   *f.Label,
+		}, Change{
+			Id:      f.ContentId(),
+			Version: f.ContentVersion,
+			Delta:   *f.Content,
+		})
+		return changes, nil
+	} else {
+		return nil, errors.New(fmt.Sprint("Unknown command:", command))
+	}
 }

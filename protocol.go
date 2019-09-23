@@ -40,4 +40,3 @@ type Update struct {
 	Changes []Change `json:"changes,omitempty"`
 	Acks    []Ack    `json:"acks,omitempty"`
 }
-
