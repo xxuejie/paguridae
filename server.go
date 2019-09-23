@@ -15,6 +15,11 @@ import (
 	"nhooyr.io/websocket"
 )
 
+const (
+	ExtractSelectionLength = 256
+	DefaultLabel = " | New Newcol Cut Copy Paste Put"
+)
+
 type File struct {
 	Id             int
 	LabelVersion   int
@@ -34,10 +39,6 @@ func (f *File) ContentId() int {
 func (f *File) IdDelta() *delta.Delta {
 	return delta.New(nil).Insert(fmt.Sprintf("%d\n%d\n", f.LabelId(), f.ContentId()), nil)
 }
-
-const (
-	ExtractSelectionLength = 256
-)
 
 func (f *File) ExtractSelection(action Action) string {
 	var delta *delta.Delta
@@ -86,82 +87,62 @@ func (f *File) ApplyChange(change Change) (*Ack, error) {
 	}, nil
 }
 
+func NewDummyFile(id int) File {
+	return File{
+		Id: id,
+		LabelVersion: 1,
+		Label: delta.New(nil).Insert(DefaultLabel, nil),
+		ContentVersion: 1,
+		Content: delta.New(nil),
+	}
+}
+
+func NewDirectoryFile(id int, path string) (*File, error) {
+	cmd := exec.Command("ls", "-F", path)
+	var out strings.Builder
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		return nil, err
+	}
+	return &File{
+		Id: id,
+		LabelVersion: 1,
+		Label: delta.New(nil).Insert(fmt.Sprintf("%s%s", path, DefaultLabel), nil),
+		ContentVersion: 1,
+		Content: delta.New(nil).Insert(out.String(), nil),
+	}, nil
+}
+
 type Connection struct {
 	Files []*File
+	NextId int
+}
+
+func (c *Connection) nextId() int {
+	i := c.NextId
+	c.NextId += 2
+	return i
 }
 
 func NewConnection() (*Connection, error) {
+	c := &Connection{
+		Files: make([]*File, 0),
+		NextId: 1,
+	}
+	// A new connection has 2 files: an empty one, and one showing
+	// contents from current directory
+	file1 := NewDummyFile(c.nextId())
 	currentPath, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
-	// A new connection has 2 files: an empty one, and one showing
-	// contents from current directory
-	cmd := exec.Command("ls", "-F", currentPath)
-	var out strings.Builder
-	cmd.Stdout = &out
-	err = cmd.Run()
+	file2, err := NewDirectoryFile(c.nextId(), currentPath)
 	if err != nil {
 		return nil, err
 	}
-
-	file1 := &File{
-		Id:             1,
-		LabelVersion:   1,
-		Label:          delta.New(nil).Insert(" | New Newcol Cut Copy Paste Put", nil),
-		ContentVersion: 1,
-		Content:        delta.New(nil),
-	}
-	file2 := &File{
-		Id:             3,
-		LabelVersion:   1,
-		Label:          delta.New(nil).Insert(currentPath, nil).Insert(" | New Newcol Cut Copy Paste Put", nil),
-		ContentVersion: 1,
-		Content:        delta.New(nil).Insert(out.String(), nil),
-	}
-	connection := &Connection{
-		Files: []*File{
-			file1, file2,
-		},
-	}
-	return connection, nil
-}
-
-type Change struct {
-	Id      int         `json:"id"`
-	Delta   delta.Delta `json:"delta"`
-	Version int         `json:"version"`
-}
-
-func (c Change) FileId() int {
-	return c.Id - 1 + c.Id%2
-}
-
-type Action struct {
-	Id     int    `json:"id"`
-	Action string `json:"action"`
-	Index  int    `json:"index"`
-	Length int    `json:"length"`
-}
-
-func (a Action) FileId() int {
-	return a.Id - 1 + a.Id%2
-}
-
-type Request struct {
-	Changes []Change `json:"changes"`
-	Action  Action   `json:"action"`
-}
-
-type Ack struct {
-	Id int `json:"id"`
-	// New version
-	Version int `json:"version"`
-}
-
-type Update struct {
-	Changes []Change `json:"changes,omitempty"`
-	Acks    []Ack    `json:"acks,omitempty"`
+	c.Files = append(c.Files, &file1, file2)
+	return c, nil
 }
 
 func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) error {
