@@ -19,7 +19,7 @@ import (
 
 const (
 	ExtractSelectionLength = 256
-	DefaultLabel           = " | New Newcol Cut Copy Paste Put"
+	DefaultLabel           = " | New Newcol Cut Copy Paste Del Put"
 )
 
 type File struct {
@@ -162,6 +162,7 @@ func NewDirectoryFile(id int, path string) (*File, error) {
 
 type command struct {
 	action    Action
+	fileIndex int
 	file      *File
 	selection string
 }
@@ -230,11 +231,12 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 
 		var changes = make([]Change, 0)
 		acks := c.applyChanges(request.Changes)
-		file := c.findFile(request.Action)
+		fileIndex, file := c.findFile(request.Action)
 		if file != nil {
 			selection := file.ExtractSelection(request.Action)
 			executeChanges, err := c.execute(command{
 				action:    request.Action,
+				fileIndex: fileIndex,
 				file:      file,
 				selection: selection,
 			})
@@ -274,6 +276,22 @@ func (c *Connection) appendFiles(files ...*File) Change {
 	}
 }
 
+func (c *Connection) deleteFile(fileIndex int) Change {
+	oldDelta := c.idDelta()
+	l := len(c.Files)
+	c.Files[fileIndex] = c.Files[l-1]
+	c.Files[l-1] = nil
+	c.Files = c.Files[:l-1]
+	newDelta := c.idDelta()
+	d := Diff(*oldDelta, *newDelta)
+	c.IdDeltaVersion += 1
+	return Change{
+		Id:      0,
+		Version: c.IdDeltaVersion,
+		Delta:   *d,
+	}
+}
+
 func (c *Connection) idDelta() *delta.Delta {
 	d := delta.New(nil)
 	for _, file := range c.Files {
@@ -282,13 +300,13 @@ func (c *Connection) idDelta() *delta.Delta {
 	return d
 }
 
-func (c *Connection) findFile(action Action) *File {
-	for _, file := range c.Files {
+func (c *Connection) findFile(action Action) (int, *File) {
+	for i, file := range c.Files {
 		if action.FileId() == file.Id {
-			return file
+			return i, file
 		}
 	}
-	return nil
+	return -1, nil
 }
 
 func (c *Connection) applyChanges(changes []Change) []Ack {
@@ -338,6 +356,13 @@ func (c *Connection) execute(command command) ([]Change, error) {
 		changes = append(changes, c.appendFiles(f))
 		changes = append(changes, f.FullDeltas()...)
 		return changes, nil
+	} else if command.action.Action == "execute" {
+		switch command.selection {
+		case "Del":
+			return []Change{c.deleteFile(command.fileIndex)}, nil
+		default:
+			return nil, errors.New(fmt.Sprint("Unknown execute command:", command.selection))
+		}
 	} else {
 		return nil, errors.New(fmt.Sprint("Unknown command:", command))
 	}
