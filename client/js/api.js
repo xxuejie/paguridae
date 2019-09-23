@@ -78,6 +78,10 @@ class Layout {
         return row.id === rowId;
       });
       if (index !== -1) {
+        const growIndex = index === 0 ? index + 1 : index - 1;
+        if (growIndex < column.rows.length) {
+          column.rows[growIndex].height += column.rows[index].height;
+        }
         column.rows.splice(index, 1);
       }
     });
