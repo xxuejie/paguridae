@@ -41,6 +41,96 @@ class Layout {
     addedIds.forEach(id => this._createRow(id));
   }
 
+  move(id, x, y) {
+    const source = this._locateEditorById(id);
+    const target = this._locateEditorByPosition(x, y);
+
+    if (!(source && target)) {
+      return;
+    }
+
+    /* TODO: column moves */
+    if (source.column === target.column &&
+        source.row === target.row) {
+      /* Shrinking row */
+      if (target.row > 0) {
+        this.columns[target.column].rows[target.row - 1].height += target.position;
+        this.columns[target.column].rows[target.row].height -= target.position;
+      }
+    } else if (source.column === target.column &&
+               source.row === target.row + 1) {
+      /* Enlarging row */
+      const diff = this.columns[target.column].rows[target.row].height - target.position;
+      this.columns[target.column].rows[target.row].height -= diff;
+      this.columns[source.column].rows[source.row].height += diff;
+    } else {
+      /* Moving row to a new location */
+      const targetId = this.columns[target.column].rows[target.row].id;
+      this._deleteRow(id);
+      const newTargetRow = this.columns[target.column].rows.findIndex(({id}) => id === targetId);
+      if (newTargetRow === -1) {
+        console.log("Unexpected!");
+        return;
+      }
+      const remaining = this.columns[target.column].rows[newTargetRow].height - target.position;
+      this.columns[target.column].rows[newTargetRow].height = target.position;
+      this.columns[target.column].rows.splice(newTargetRow + 1, 0, {
+        height: remaining,
+        id,
+      });
+    }
+  }
+
+  _locateEditorById(id) {
+    for (const [columnIndex, column] of this.columns.entries()) {
+      for (const [rowIndex, row] of column.rows.entries()) {
+        if (row.id === id) {
+          return {
+            column: columnIndex,
+            row: rowIndex,
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  _locateEditorByPosition(x, y) {
+    let targetColumn = -1;
+    let currentWidth = 0;
+    for (const [columnIndex, column] of this.columns.entries()) {
+      if (x < currentWidth + column.width) {
+        targetColumn = columnIndex;
+        break;
+      }
+      currentWidth += column.width;
+    }
+    if (targetColumn === -1) {
+      console.error("Cannot locate dropped column!");
+      return null;
+    }
+
+    let targetRow = -1;
+    let currentHeight = 0;
+    for (const [rowIndex, row] of this.columns[targetColumn].rows.entries()) {
+      if (y < currentHeight + row.height) {
+        targetRow = rowIndex;
+        break;
+      }
+      currentHeight += row.height;
+    }
+    if (targetRow === -1) {
+      console.error("Cannot locate dropped row!");
+      return null;
+    }
+
+    return {
+      column: targetColumn,
+      row: targetRow,
+      position: y - currentHeight,
+    };
+  }
+
   _createRow(rowId) {
     let columnIndex = -1;
     let columnSpareHeight = 0;
@@ -195,6 +285,7 @@ export class Api {
   }
 
   move({id, x, y}) {
-    console.log(`Moving ${id}, x: ${x}, y: ${y}`);
+    this.layout.move(id, x, y);
+    this.onchange({ layout: { columns: this.layout.columns } });
   }
 }
