@@ -19,7 +19,7 @@ import (
 
 const (
 	ExtractSelectionLength = 256
-	DefaultLabel           = " | New Newcol Cut Copy Paste Del Put"
+	DefaultLabel           = " | New Del Put"
 )
 
 type File struct {
@@ -358,6 +358,12 @@ func (c *Connection) execute(command command) ([]Change, error) {
 		return changes, nil
 	} else if command.action.Action == "execute" {
 		switch command.selection {
+		case "New":
+			f := NewDummyFile(c.nextId())
+			changes := make([]Change, 0)
+			changes = append(changes, c.appendFiles(&f))
+			changes = append(changes, f.FullDeltas()...)
+			return changes, nil
 		case "Del":
 			return []Change{c.deleteFile(command.fileIndex)}, nil
 		default:
