@@ -49,8 +49,22 @@ class Layout {
       return;
     }
 
-    /* TODO: column moves */
-    if (source.column === target.column &&
+    if (source.row === 0 && target.row === 0 &&
+        source.column === target.column &&
+        target.position < 5) {
+      /* Shrinking column */
+      if (target.column > 0) {
+        this.columns[target.column - 1].width += target.xPosition;
+        this.columns[target.column].width -= target.xPosition;
+      }
+    } else if (source.row === 0 && target.row === 0 &&
+               source.column === target.column + 1 &&
+               target.position < 5) {
+      /* Enlarging column */
+      const diff = this.columns[target.column].width - target.xPosition;
+      this.columns[target.column].width -= diff;
+      this.columns[source.column].width += diff;
+    } else if (source.column === target.column &&
         source.row === target.row) {
       /* Shrinking row */
       if (target.row > 0) {
@@ -131,6 +145,7 @@ class Layout {
       column: targetColumn,
       row: targetRow,
       position: y - currentHeight,
+      xPosition: x - currentWidth,
     };
   }
 
