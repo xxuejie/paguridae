@@ -63,6 +63,13 @@ class Layout {
       const diff = this.columns[target.column].rows[target.row].height - target.position;
       this.columns[target.column].rows[target.row].height -= diff;
       this.columns[source.column].rows[source.row].height += diff;
+    } else if (target.row === -1) {
+      /* Moving row to an empty column */
+      this._deleteRow(id);
+      this.columns[target.column].rows.splice(0, 0, {
+        height: 100,
+        id,
+      });
     } else {
       /* Moving row to a new location */
       const targetId = this.columns[target.column].rows[target.row].id;
@@ -118,10 +125,6 @@ class Layout {
         break;
       }
       currentHeight += row.height;
-    }
-    if (targetRow === -1) {
-      console.error("Cannot locate dropped row!");
-      return null;
     }
 
     return {
