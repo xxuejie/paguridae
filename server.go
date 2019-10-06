@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	DefaultLabel = " | New Del Put"
+	DefaultLabel    = " | New Del Put"
 	DummyAckVersion = int((^uint(0)) >> 1)
 )
 
@@ -305,7 +305,7 @@ func (c *Connection) applyChanges(changes []Change) []Ack {
 			// future we will see if we need to keep those changes somewhere
 			log.Printf("File %d has been deleted, sending dummy ack", change.FileId())
 			acks = append(acks, Ack{
-				Id: change.Id,
+				Id:      change.Id,
 				Version: DummyAckVersion,
 			})
 		}
