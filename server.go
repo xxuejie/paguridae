@@ -18,6 +18,7 @@ import (
 
 const (
 	DefaultLabel = " | New Del Put"
+	DummyAckVersion = int((^uint(0)) >> 1)
 )
 
 type File struct {
@@ -285,6 +286,7 @@ func (c *Connection) findFile(action Action) (int, *File) {
 func (c *Connection) applyChanges(changes []Change) []Ack {
 	acks := make([]Ack, 0)
 	for _, change := range changes {
+		found := false
 		for _, file := range c.Files {
 			if change.FileId() == file.Id {
 				ack, err := file.ApplyChange(change)
@@ -293,8 +295,19 @@ func (c *Connection) applyChanges(changes []Change) []Ack {
 				} else {
 					acks = append(acks, *ack)
 				}
+				found = true
 				break
 			}
+		}
+		if !found {
+			// The change sent belongs to a file that's already been deleted,
+			// for now, we send a dummy ack to keep the process working, in the
+			// future we will see if we need to keep those changes somewhere
+			log.Printf("File %d has been deleted, sending dummy ack", change.FileId())
+			acks = append(acks, Ack{
+				Id: change.Id,
+				Version: DummyAckVersion,
+			})
 		}
 	}
 	return acks

@@ -28,12 +28,7 @@ class Layout {
 
   update(changes) {
     this.data = changes.reduce((data, change) => data.compose(new Delta(change.delta)), this.data);
-    const currentIds = this.data.filter(op => typeof op.insert === "string")
-                           .map(op => op.insert)
-                           .join("")
-                           .split("\n")
-                           .map(line => parseInt(line, 10))
-                           .filter(id => id > 0 && id % 2 !== 0);
+    const currentIds = this._currentIds();
     const oldIds = [].concat(...this.columns.map(column => column.rows.map(row => row.id)));
     const addedIds = currentIds.filter(id => !oldIds.includes(id));
     const deletedIds = oldIds.filter(id => !currentIds.includes(id));
@@ -100,6 +95,15 @@ class Layout {
         id,
       });
     }
+  }
+
+  _currentIds() {
+    return this.data.filter(op => typeof op.insert === "string")
+                           .map(op => op.insert)
+                           .join("")
+                           .split("\n")
+                           .map(line => parseInt(line, 10))
+                           .filter(id => id > 0 && id % 2 !== 0);
   }
 
   _locateEditorById(id) {
