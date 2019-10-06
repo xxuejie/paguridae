@@ -289,8 +289,12 @@ export class Api {
       console.log("Version mismatch, something is wrong!");
       return;
     }
-    this.buffered_changes[id].delta = this.buffered_changes[id].delta || new Delta();
-    this.buffered_changes[id].delta = this.buffered_changes[id].delta.compose(delta);
+    const aggregated = (this.buffered_changes[id].delta || new Delta()).compose(delta);
+    if (aggregated.ops.length === 0) {
+      delete this.buffered_changes[id];
+    } else {
+      this.buffered_changes[id].delta = aggregated;
+    }
   }
 
   action(data) {
