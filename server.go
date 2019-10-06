@@ -315,11 +315,16 @@ func (c *Connection) applyChanges(changes []Change) []Ack {
 
 func (c *Connection) execute(command command) ([]Change, error) {
 	if command.action.Action == "search" {
-		path := command.file.Path()
-		if !strings.HasSuffix(path, "/") {
-			path += "/../"
+		var path string
+		if strings.HasPrefix(command.action.Selection, "/") {
+			path = command.action.Selection
+		} else {
+			path = command.file.Path()
+			if !strings.HasSuffix(path, "/") {
+				path += "/../"
+			}
+			path += command.action.Selection
 		}
-		path += command.action.Selection
 		path = filepath.Clean(path)
 		stat, err := os.Stat(path)
 		if err != nil {
