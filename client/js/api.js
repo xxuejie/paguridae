@@ -251,10 +251,12 @@ export class Api {
           ackChanges.push({ id, version });
           this.inflight_changes = this.inflight_changes.filter(c => c.id !== id);
         });
-        if (this.inflight_changes.length > 0) {
-          console.log("Inflight changes not cleared:", this.inflight_changes, "Maybe something is wrong?");
+        if (this.inflight_changes.length === 0) {
+          this.inflight_changes = null;
         }
-        this.inflight_changes = null;
+      }
+      if (this.inflight_changes) {
+        console.log("Inflight changes not cleared:", this.inflight_changes, "Maybe something is wrong?");
       }
       changes = changes || [];
       /*
