@@ -13,6 +13,24 @@ Object.freeze(ACTIONS);
 
 const IS_MOBILE = /Android|iPhone|iPad/i.test(window.navigator.userAgent);
 
+const ACTION_SELECTION_EXPAND_LENGTH = 256;
+function generate_action(action, editor, { index, length }, api) {
+  const start = (index > ACTION_SELECTION_EXPAND_LENGTH) ?
+                (index - ACTION_SELECTION_EXPAND_LENGTH) :
+                0;
+  const firstHalf = editor.__quill.getText(start, index - start);
+  const secondHalf = editor.__quill.getText(index, ACTION_SELECTION_EXPAND_LENGTH);
+  const firstHalfMatch = (firstHalf.match(/\S+$/) || [""])[0];
+  const secondHalfMatch = (secondHalf.match(/^\S+/) || [""])[0];
+  const selection = `${firstHalfMatch}${secondHalfMatch}`;
+  api.action({
+    action,
+    id: editor.__id,
+    index,
+    selection
+  });
+}
+
 export class Window {
   constructor(api) {
     this.el = el(".window");
@@ -54,12 +72,7 @@ export class Window {
         selection.length = 0;
       }
 
-      api.action({
-        action,
-        id: editor.__id,
-        index: selection.index,
-        length: selection.length
-      });
+      generate_action(action, editor, selection, api);
     });
     this.el.addEventListener("touchstart", event => {
       if (event.touches.length == 1) {
@@ -83,12 +96,7 @@ export class Window {
         const actionKey = (event.touches[source].pageY < event.touches[target].pageY) ? 1 : 2;
         const action = ACTIONS[actionKey];
 
-        api.action({
-          action,
-          id: editor.__id,
-          index: selection.index,
-          length: selection.length
-        });
+        generate_action(action, editor, selection, api);
       }
     });
     if (!IS_MOBILE) {

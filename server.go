@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/fmpwizard/go-quilljs-delta/delta"
@@ -18,8 +17,7 @@ import (
 )
 
 const (
-	ExtractSelectionLength = 256
-	DefaultLabel           = " | New Del Put"
+	DefaultLabel = " | New Del Put"
 )
 
 type File struct {
@@ -44,28 +42,6 @@ func (f *File) IdDelta() *delta.Delta {
 
 func (f *File) Path() string {
 	return strings.SplitN(DeltaToString(*f.Label), " ", 2)[0]
-}
-
-func (f *File) ExtractSelection(action Action) string {
-	var delta *delta.Delta
-	if action.Id == f.LabelId() {
-		delta = f.Label
-	} else {
-		delta = f.Content
-	}
-	if action.Length > 0 {
-		return DeltaToString(*delta.Slice(action.Index, action.Index+action.Length))
-	} else {
-		start := action.Index - ExtractSelectionLength
-		if start < 0 {
-			start = 0
-		}
-		firstHalf := DeltaToString(*delta.Slice(start, action.Index))
-		secondHalf := DeltaToString(*delta.Slice(action.Index, action.Index+ExtractSelectionLength))
-		firstHalfMatch := regexp.MustCompile(`\S+$`).FindString(firstHalf)
-		secondHalfMatch := regexp.MustCompile(`^\S+`).FindString(secondHalf)
-		return firstHalfMatch + secondHalfMatch
-	}
 }
 
 func (f *File) ApplyChange(change Change) (*Ack, error) {
@@ -164,7 +140,6 @@ type command struct {
 	action    Action
 	fileIndex int
 	file      *File
-	selection string
 }
 
 type Connection struct {
@@ -233,12 +208,10 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 		acks := c.applyChanges(request.Changes)
 		fileIndex, file := c.findFile(request.Action)
 		if file != nil {
-			selection := file.ExtractSelection(request.Action)
 			executeChanges, err := c.execute(command{
 				action:    request.Action,
 				fileIndex: fileIndex,
 				file:      file,
-				selection: selection,
 			})
 			if err != nil {
 				log.Print("Error executing command:", err)
@@ -333,7 +306,7 @@ func (c *Connection) execute(command command) ([]Change, error) {
 		if !strings.HasSuffix(path, "/") {
 			path += "/../"
 		}
-		path += command.selection
+		path += command.action.Selection
 		path = filepath.Clean(path)
 		stat, err := os.Stat(path)
 		if err != nil {
@@ -357,7 +330,7 @@ func (c *Connection) execute(command command) ([]Change, error) {
 		changes = append(changes, f.FullDeltas()...)
 		return changes, nil
 	} else if command.action.Action == "execute" {
-		switch command.selection {
+		switch command.action.Selection {
 		case "New":
 			f := NewDummyFile(c.nextId())
 			changes := make([]Change, 0)
@@ -367,7 +340,7 @@ func (c *Connection) execute(command command) ([]Change, error) {
 		case "Del":
 			return []Change{c.deleteFile(command.fileIndex)}, nil
 		default:
-			return nil, errors.New(fmt.Sprint("Unknown execute command:", command.selection))
+			return nil, errors.New(fmt.Sprint("Unknown execute command:", command.action.Selection))
 		}
 	} else {
 		return nil, errors.New(fmt.Sprint("Unknown command:", command))

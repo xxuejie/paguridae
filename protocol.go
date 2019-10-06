@@ -15,10 +15,10 @@ func (c Change) FileId() int {
 }
 
 type Action struct {
-	Id     int    `json:"id"`
-	Action string `json:"action"`
-	Index  int    `json:"index"`
-	Length int    `json:"length"`
+	Id        int    `json:"id"`
+	Action    string `json:"action"`
+	Index     int    `json:"index"`
+	Selection string `json:"selection"`
 }
 
 func (a Action) FileId() int {
