@@ -1,4 +1,4 @@
-import { _, document, Quill } from "./externals.js";
+import { document, Quill } from "./externals.js";
 const Delta = Quill.import("delta");
 
 const LAYOUT_ID = 0;

@@ -4,8 +4,18 @@ build:
 dev: generate-static build
 	./paguridae -useLocalAsset=true
 
+prod: generate-prod-static build
+
 generate-static:
 	esc -o static.go -prefix="client" client
+
+generate-prod-static:
+	mkdir -p dist
+	esbuild --bundle --outfile=dist/main.js --minify client/js/main.js
+	go run cmd/html-processor/main.go -inputFile client/index.html -outputFile dist/index.html
+	rm dist/main.js
+	esc -o static.go -prefix="dist" dist
+	rm -r dist
 
 fmt:
 	gofmt -s -w .
@@ -13,4 +23,4 @@ fmt:
 clean:
 	rm -rf paguridae static.go
 
-.PHONY: build clean dev fmt generate-static
+.PHONY: build clean dev fmt generate-static generate-prod-static prod

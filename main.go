@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/NYTimes/gziphandler"
 	"nhooyr.io/websocket"
 )
 
@@ -31,7 +32,7 @@ func webSocketHandler(w http.ResponseWriter, req *http.Request) {
 func main() {
 	flag.Parse()
 	http.HandleFunc("/ws", webSocketHandler)
-	http.Handle("/", http.FileServer(FS(*useLocalAsset)))
+	http.Handle("/", gziphandler.GzipHandler(http.FileServer(FS(*useLocalAsset))))
 	log.Printf("Starting server on port: %d", *port)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *port), nil))
 }
