@@ -15,14 +15,19 @@ const IS_MOBILE = /Android|iPhone|iPad/i.test(window.navigator.userAgent);
 
 const ACTION_SELECTION_EXPAND_LENGTH = 256;
 function generate_action(action, editor, { index, length }, api) {
-  const start = (index > ACTION_SELECTION_EXPAND_LENGTH) ?
-                (index - ACTION_SELECTION_EXPAND_LENGTH) :
-                0;
-  const firstHalf = editor.__quill.getText(start, index - start);
-  const secondHalf = editor.__quill.getText(index, ACTION_SELECTION_EXPAND_LENGTH);
-  const firstHalfMatch = (firstHalf.match(/\S+$/) || [""])[0];
-  const secondHalfMatch = (secondHalf.match(/^\S+/) || [""])[0];
-  const selection = `${firstHalfMatch}${secondHalfMatch}`;
+  var selection = "";
+  if (length > 0) {
+    selection = editor.__quill.getText(index, length);
+  } else {
+    const start = (index > ACTION_SELECTION_EXPAND_LENGTH) ?
+                  (index - ACTION_SELECTION_EXPAND_LENGTH) :
+                  0;
+    const firstHalf = editor.__quill.getText(start, index - start);
+    const secondHalf = editor.__quill.getText(index, ACTION_SELECTION_EXPAND_LENGTH);
+    const firstHalfMatch = (firstHalf.match(/\S+$/) || [""])[0];
+    const secondHalfMatch = (secondHalf.match(/^\S+/) || [""])[0];
+    selection = `${firstHalfMatch}${secondHalfMatch}`;
+  }
   api.action({
     action,
     id: editor.__id,
