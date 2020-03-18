@@ -250,7 +250,15 @@ export class Api {
     this.connection = new Connection(({changes}) => {
       changes = changes || [];
       if (Object.keys(this.buffered_changes).length !== 0) {
-        signalError("TODO: transform buffered changes & received changes!");
+        changes = changes.map(change => {
+          const localDelta = this.buffered_changes[change.id];
+          const remoteDelta = change.change.delta;
+          if (localDelta && remoteDelta) {
+            this.buffered_changes[change.id] = remoteDelta.transform(localDelta, true);
+            change.change.delta = localDelta.transform(remoteDelta, false);
+          }
+          return change;
+        });
       }
       const editorChanges = {
         rows: changes.filter(change => change.id != LAYOUT_ID)
