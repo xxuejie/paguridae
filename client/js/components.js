@@ -29,7 +29,7 @@ function generate_action(action, editor, { index, length }, api) {
     selection = `${firstHalfMatch}${secondHalfMatch}`;
   }
   api.action({
-    action,
+    type: action,
     id: editor.__id,
     index,
     selection
@@ -208,7 +208,9 @@ export class Row {
       setStyle(this.el, {height: `${height}%`});
     }
     if (change) {
-      const {id, delta, version} = change;
+      const id = change.id;
+      const delta = change.change && change.change.delta;
+      const version = change.change && change.change.version;
       if (id === this.label.__id) {
         if (delta) {
           this.labelEditor.updateContents(new Delta(delta));

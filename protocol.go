@@ -1,42 +1,29 @@
 package main
 
 import (
-	"github.com/fmpwizard/go-quilljs-delta/delta"
+	"github.com/xxuejie/go-delta-ot/ot"
 )
 
-type Change struct {
-	Id      int         `json:"id"`
-	Delta   delta.Delta `json:"delta"`
-	Version int         `json:"version"`
-}
-
-func (c Change) FileId() int {
-	return c.Id - 1 + c.Id%2
-}
-
 type Action struct {
-	Id        int    `json:"id"`
-	Action    string `json:"action"`
-	Index     int    `json:"index"`
+	Id        uint32 `json:"id"`
+	Type      string `json:"type"`
+	Index     uint32 `json:"index"`
 	Selection string `json:"selection"`
 }
 
-func (a Action) FileId() int {
+func (a Action) LabelId() uint32 {
 	return a.Id - 1 + a.Id%2
 }
 
-type Request struct {
-	Changes []Change `json:"changes"`
-	Action  Action   `json:"action"`
+func (a Action) ContentId() uint32 {
+	return a.LabelId() + 1
 }
 
-type Ack struct {
-	Id int `json:"id"`
-	// New version
-	Version int `json:"version"`
+type Request struct {
+	Changes []ot.MultiFileChange `json:"changes"`
+	Action  Action               `json:"action"`
 }
 
 type Update struct {
-	Changes []Change `json:"changes,omitempty"`
-	Acks    []Ack    `json:"acks,omitempty"`
+	Changes []ot.MultiFileChange `json:"changes,omitempty"`
 }

@@ -1,4 +1,4 @@
-import { document, Quill } from "./externals.js";
+import { document, signalError, Quill } from "./externals.js";
 const Delta = Quill.import("delta");
 
 const LAYOUT_ID = 0;
@@ -27,7 +27,7 @@ class Layout {
   }
 
   update(changes) {
-    this.data = changes.reduce((data, change) => data.compose(new Delta(change.delta)), this.data);
+    this.data = changes.reduce((data, change) => data.compose(new Delta(change.change.delta)), this.data);
     const currentIds = this._currentIds();
     const oldIds = [].concat(...this.columns.map(column => column.rows.map(row => row.id)));
     const addedIds = currentIds.filter(id => !oldIds.includes(id));
@@ -231,7 +231,7 @@ class Connection {
 
   send(message) {
     if (!this.connected) {
-      window.alert("Not connected!");
+      signalError("Not connected!");
       return;
     }
     /* All communication is asynchronous, no need to get a response here */
@@ -243,30 +243,17 @@ export class Api {
   constructor() {
     this.layout = new Layout();
     this.buffered_changes = {};
-    this.inflight_changes = [];
   }
 
   init(onchange) {
     this.onchange = onchange;
-    this.connection = new Connection(({acks, changes}) => {
-      const ackChanges = [];
-      if (acks) {
-        acks.forEach(({ id, version }) => {
-          ackChanges.push({ id, version });
-          this.inflight_changes = this.inflight_changes.filter(c => c.id !== id);
-        });
-      }
-      if (this.inflight_changes.length > 0) {
-        console.log("Inflight changes not cleared:", this.inflight_changes, "Maybe something is wrong?");
-      }
+    this.connection = new Connection(({changes}) => {
       changes = changes || [];
-      /*
-       * TODO: when there's buffered changes, do necessary
-       * transforms and version updates.
-       */
-      const textChanges = changes.filter(change => change.id != LAYOUT_ID)
+      if (Object.keys(this.buffered_changes).length !== 0) {
+        signalError("TODO: transform buffered changes & received changes!");
+      }
       const editorChanges = {
-        rows: ackChanges.concat(textChanges)
+        rows: changes.filter(change => change.id != LAYOUT_ID)
       };
       const layoutChanges = changes.filter(change => change.id === LAYOUT_ID);
       if (layoutChanges.length > 0) {
@@ -283,7 +270,7 @@ export class Api {
   textchange(id, delta, version) {
     this.buffered_changes[id] = this.buffered_changes[id] || { id: id, version: version };
     if (this.buffered_changes[id].version !== version) {
-      console.log("Version mismatch, something is wrong!");
+      signalError("Version mismatch, something is wrong!");
       return;
     }
     const aggregated = (this.buffered_changes[id].delta || new Delta()).compose(delta);
@@ -295,17 +282,11 @@ export class Api {
   }
 
   action(data) {
-    if (this.inflight_changes.length > 0) {
-      console.log("Action inflight, skipping!");
-      return;
-    }
-    const payload = { action: data };
-    const buffered_changes = Object.values(this.buffered_changes);
+    const payload = {
+      action: data,
+      changes: Object.values(this.buffered_changes)
+    };
     this.buffered_changes = {};
-    if (buffered_changes.length > 0) {
-      this.inflight_changes = buffered_changes;
-      payload.changes = buffered_changes;
-    }
     this.connection.send(payload);
   }
 
