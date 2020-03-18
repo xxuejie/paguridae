@@ -26,4 +26,5 @@ type Request struct {
 
 type Update struct {
 	Changes []ot.MultiFileChange `json:"changes,omitempty"`
+	Hashes  map[uint32]string    `json:"hashes,omitempty"`
 }

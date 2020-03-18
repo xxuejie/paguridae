@@ -2,7 +2,7 @@ build:
 	go build ./cmd/paguridae
 
 dev: generate-static build
-	./paguridae -useLocalAsset=true
+	./paguridae -useLocalAsset=true -verifyContent=true
 
 prod: generate-prod-static build
 

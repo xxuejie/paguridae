@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,11 +39,12 @@ type Connection struct {
 	BufferedChanges []ot.MultiFileChange
 	NextId          uint32
 	Server          *ot.MultiFileServer
+	VerifyContent   bool
 
 	mux sync.Mutex
 }
 
-func NewConnection() (*Connection, error) {
+func NewConnection(verifyContent bool) (*Connection, error) {
 	server := ot.NewMultiFileServer()
 	go func() {
 		server.Start()
@@ -51,6 +53,7 @@ func NewConnection() (*Connection, error) {
 		BufferedChanges: make([]ot.MultiFileChange, 0),
 		NextId:          MetaFileId + 1,
 		Server:          server,
+		VerifyContent:   verifyContent,
 	}
 	userCreated, userUpdates := server.NewClient(UserClientId)
 	if !(<-userCreated) {
@@ -242,8 +245,24 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 
 		changes := c.GrabChanges()
 		if len(changes) > 0 {
+			var hashes map[uint32]string
+			if c.VerifyContent {
+				hashes = make(map[uint32]string)
+				for _, change := range changes {
+					if _, ok := hashes[change.Id]; !ok {
+						content := DeltaToString(*c.Server.CurrentChange(change.Id).Change.Delta)
+						// QuillJS always add a new line at the very end of editor
+						if change.Id != MetaFileId {
+							content += "\n"
+						}
+						hashes[change.Id] = fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
+					}
+				}
+			}
+
 			updateBytes, err := json.Marshal(Update{
 				Changes: changes,
+				Hashes:  hashes,
 			})
 			if err != nil {
 				return err

@@ -12,6 +12,7 @@ import (
 
 var port = flag.Int("port", 8000, "port to listen for http server")
 var useLocalAsset = flag.Bool("useLocalAsset", false, "development only, you shouldn't use true in production")
+var verifyContent = flag.Bool("verifyContent", false, "development only, set to true to enable content verification")
 
 func webSocketHandler(w http.ResponseWriter, req *http.Request) {
 	c, err := websocket.Accept(w, req, websocket.AcceptOptions{})
@@ -22,7 +23,7 @@ func webSocketHandler(w http.ResponseWriter, req *http.Request) {
 	defer c.Close(websocket.StatusInternalError, "oops")
 	log.Print("Websocket connection established!")
 
-	connection, err := NewConnection()
+	connection, err := NewConnection(*verifyContent)
 	if err != nil {
 		log.Print("Error creating connection:", err)
 		return

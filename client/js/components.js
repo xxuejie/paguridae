@@ -1,4 +1,4 @@
-import { redom, Quill } from "./externals.js";
+import { redom, verifyContent, Quill } from "./externals.js";
 
 const {el, listPool, setChildren, setStyle} = redom;
 const Delta = Quill.import("delta");
@@ -43,6 +43,8 @@ export class Window {
 
     api.init(data => {
       this.update(data);
+    }, hashes => {
+      this.verify(hashes)
     });
 
     this.el.addEventListener("mousedown", event => {
@@ -169,6 +171,18 @@ export class Window {
       });
     }
   }
+
+  verify(hashes) {
+    const { lookup } = this.rows;
+    Object.keys(hashes).forEach(function(contentId) {
+      contentId = parseInt(contentId);
+      const id = contentId - 1 + contentId % 2;
+      const row = lookup[id];
+      if (row) {
+        row.verify(contentId, hashes[contentId]);
+      }
+    });
+  }
 }
 
 export class Row {
@@ -226,6 +240,16 @@ export class Row {
           this.content.__version = version;
         }
       }
+    }
+  }
+
+  verify(id, hash) {
+    if (id === this.label.__id) {
+      verifyContent(this.labelEditor.getContents(), hash);
+    } else if (id === this.content.__id) {
+      verifyContent(this.contentEditor.getContents(), hash);
+    } else {
+      console.log("Unknown ID: " + id + " for row: " + this.id);
     }
   }
 }

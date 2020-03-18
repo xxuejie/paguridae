@@ -1,4 +1,4 @@
-import { document, signalError, Quill } from "./externals.js";
+import { document, signalError, verifyContent, Quill } from "./externals.js";
 const Delta = Quill.import("delta");
 
 const LAYOUT_ID = 0;
@@ -24,6 +24,10 @@ class Layout {
         rows: []
       }
     ];
+  }
+
+  verify(hash) {
+    verifyContent(this.data, hash);
   }
 
   update(changes) {
@@ -245,9 +249,10 @@ export class Api {
     this.buffered_changes = {};
   }
 
-  init(onchange) {
+  init(onchange, onverify) {
     this.onchange = onchange;
-    this.connection = new Connection(({changes}) => {
+    this.onverify = onverify;
+    this.connection = new Connection(({changes, hashes}) => {
       changes = changes || [];
       if (Object.keys(this.buffered_changes).length !== 0) {
         changes = changes.map(change => {
@@ -271,6 +276,13 @@ export class Api {
         };
       }
       this.onchange(editorChanges);
+      if (hashes) {
+        if (hashes[LAYOUT_ID]) {
+          this.layout.verify(hashes[LAYOUT_ID]);
+          delete hashes[LAYOUT_ID];
+        }
+        this.onverify(hashes);
+      }
     });
     this.connection.connect();
   }
