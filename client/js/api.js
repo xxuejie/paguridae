@@ -306,6 +306,7 @@ export class Api {
       action: data,
       changes: Object.values(this.buffered_changes)
     };
+    // TODO: do we need to wait for ack?
     this.buffered_changes = {};
     this.connection.send(payload);
   }
