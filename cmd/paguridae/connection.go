@@ -159,14 +159,14 @@ func (c *Connection) closeFile(fileId uint32) {
 	<-notify
 }
 
-func (c *Connection) createFile(label string, content *string) error {
+func (c *Connection) createFile(label string, content *string) (uint32, error) {
 	labelId := c.NextId
 	contentId := c.NextId + 1
 	c.NextId += 2
 	c.refreshMetafile(labelId, contentId)
 	if !(<-c.Server.NewFile(labelId, *delta.New(nil).Insert(label, nil))) {
 		c.refreshMetafile()
-		return errors.New("Error creating label component!")
+		return 0, errors.New("Error creating label component!")
 	}
 	contentDelta := delta.New(nil)
 	if content != nil {
@@ -175,13 +175,26 @@ func (c *Connection) createFile(label string, content *string) error {
 	if !(<-c.Server.NewFile(contentId, *contentDelta)) {
 		c.closeFile(labelId)
 		c.refreshMetafile()
-		return errors.New("Error creating content component!")
+		return 0, errors.New("Error creating content component!")
 	}
-	return nil
+	return contentId, nil
 }
 
 func (c *Connection) CreateDummyFile() error {
-	return c.createFile(DefaultLabel, nil)
+	_, err := c.createFile(DefaultLabel, nil)
+	return err
+}
+
+func (c *Connection) FindOrCreateDummyFile(path string) (uint32, error) {
+	for _, change := range c.Server.AllChanges() {
+		if change.Id%2 != 0 {
+			if extractPath(*change.Change.Delta) == path {
+				// Return content Id based on current label Id
+				return change.Id + 1, nil
+			}
+		}
+	}
+	return c.createFile(fmt.Sprintf("%s%s", path, DefaultLabel), nil)
 }
 
 func (c *Connection) CreateDirectoryListingFile(path string) error {
@@ -196,22 +209,30 @@ func (c *Connection) CreateDirectoryListingFile(path string) error {
 		return err
 	}
 	content := out.String()
-	return c.createFile(fmt.Sprintf("%s%s", path, DefaultLabel), &content)
+	_, err = c.createFile(fmt.Sprintf("%s%s", path, DefaultLabel), &content)
+	return err
 }
 
-func (c *Connection) FindOrOpenFile(path string) error {
-	// TODO: skip opening already opened file
+func (c *Connection) FindOrOpenFile(path string) (uint32, error) {
 	// TODO: partial read for larger files
 	stat, err := os.Stat(path)
+	for _, change := range c.Server.AllChanges() {
+		if change.Id%2 != 0 {
+			if extractPath(*change.Change.Delta) == path {
+				// Return content Id based on current label Id
+				return change.Id + 1, nil
+			}
+		}
+	}
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if stat.Size() > 128*1024 {
-		return errors.New("File too large!")
+		return 0, errors.New("File too large!")
 	}
 	content, err := ioutil.ReadFile(path)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	contentString := string(content)
 	return c.createFile(fmt.Sprintf("%s%s", path, DefaultLabel), &contentString)
@@ -344,7 +365,7 @@ func (c *Connection) execute(action Action) error {
 		if stat.IsDir() {
 			err = c.CreateDirectoryListingFile(path)
 		} else {
-			err = c.FindOrOpenFile(path)
+			_, err = c.FindOrOpenFile(path)
 		}
 		if err != nil {
 			return err
@@ -358,9 +379,52 @@ func (c *Connection) execute(action Action) error {
 			c.deleteFile(action)
 			return nil
 		default:
-			return errors.New(fmt.Sprint("Unknown execute command:", action.Selection))
+			cmds := strings.Split(action.Selection, " ")
+			if len(cmds) > 0 {
+				path, err := exec.LookPath(cmds[0])
+				if err == nil {
+					cmd := exec.Command(path, cmds[1:]...)
+					w := &errorsBufferWriter{
+						path: filepath.Dir(extractPath(*c.Server.CurrentChange(action.LabelId()).Change.Delta)),
+						c:    c,
+					}
+					cmd.Stdout = w
+					cmd.Stderr = w
+					err = cmd.Start()
+					if err != nil {
+						return err
+					}
+				}
+			}
+			return nil
 		}
 	} else {
 		return errors.New(fmt.Sprint("Unknown action type:", action.Type))
 	}
+}
+
+type errorsBufferWriter struct {
+	contentFileId uint32
+	path          string
+	c             *Connection
+}
+
+func (w *errorsBufferWriter) Write(p []byte) (n int, err error) {
+	if w.contentFileId == 0 {
+		// Initialize file ID
+		w.contentFileId, err = w.c.FindOrCreateDummyFile(filepath.Join(w.path, "+Errors"))
+		if err != nil {
+			return
+		}
+	}
+	currentChange := w.c.Server.CurrentChange(w.contentFileId)
+	w.c.Server.Submit(SystemClientId, ot.MultiFileChange{
+		Id: currentChange.Id,
+		Change: ot.Change{
+			Version: currentChange.Change.Version,
+			Delta: delta.New(nil).Retain(currentChange.Change.Delta.Length(), nil).
+				Insert(string(p), nil),
+		},
+	})
+	return len(p), nil
 }
