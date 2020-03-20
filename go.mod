@@ -1,8 +1,11 @@
 module github.com/xxuejie/paguridae
 
 require (
+	aqwari.net/net/styx v0.0.0-20190815231200-7169067e3f80
+	aqwari.net/retry v0.0.0-20180428204214-1281ce5d8df0 // indirect
 	github.com/NYTimes/gziphandler v1.1.1
 	github.com/fmpwizard/go-quilljs-delta v0.0.6-0.20190628042138-9bdce66302c2
+	github.com/google/uuid v1.1.1
 	github.com/mjibson/esc v0.2.0
 	github.com/pkg/errors v0.8.1 // indirect
 	github.com/sergi/go-diff v1.0.0

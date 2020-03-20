@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/fmpwizard/go-quilljs-delta/delta"
+	"github.com/google/uuid"
 	"github.com/xxuejie/go-delta-ot/ot"
 	"nhooyr.io/websocket"
 )
@@ -41,10 +43,25 @@ type Connection struct {
 	Server          *ot.MultiFileServer
 	VerifyContent   bool
 
-	mux sync.Mutex
+	listenPath string
+	listener   net.Listener
+	mux        sync.Mutex
 }
 
 func NewConnection(verifyContent bool) (*Connection, error) {
+	listenPath := fmt.Sprintf("/tmp/paguridae/%s", uuid.New().String())
+	listenDirectory := filepath.Dir(listenPath)
+	_, err := os.Stat(listenDirectory)
+	if os.IsNotExist(err) {
+		err = os.Mkdir(listenDirectory, 0755)
+	}
+	if err != nil {
+		return nil, err
+	}
+	listener, err := net.Listen("unix", listenPath)
+	if err != nil {
+		return nil, err
+	}
 	server := ot.NewMultiFileServer()
 	go func() {
 		server.Start()
@@ -54,6 +71,8 @@ func NewConnection(verifyContent bool) (*Connection, error) {
 		NextId:          MetaFileId + 1,
 		Server:          server,
 		VerifyContent:   verifyContent,
+		listenPath:      listenPath,
+		listener:        listener,
 	}
 	userCreated, userUpdates := server.NewClient(UserClientId)
 	if !(<-userCreated) {
@@ -78,10 +97,18 @@ func NewConnection(verifyContent bool) (*Connection, error) {
 		server.Stop()
 		return nil, errors.New("Error creating metafile!")
 	}
+	go func() {
+		err := Serve9PFileSystem(listener, server)
+		if err != nil {
+			log.Printf("Error encountered in serving 9P: %v", err)
+		}
+	}()
 	return connection, nil
 }
 
 func (c *Connection) Stop() {
+	c.listener.Close()
+	os.Remove(c.listenPath)
 	c.Server.Stop()
 }
 
