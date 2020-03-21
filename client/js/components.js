@@ -14,10 +14,17 @@ Object.freeze(ACTIONS);
 const IS_MOBILE = /Android|iPhone|iPad/i.test(window.navigator.userAgent);
 
 const ACTION_SELECTION_EXPAND_LENGTH = 256;
-function generate_action(action, editor, { index, length }, api) {
-  var selection = "";
+function generate_action(action, editor, { index, length }, api, oldSelection) {
+  if (!oldSelection) {
+    // Use current command selection in case old selection does not exist
+    oldSelection = {
+      id: editor.__id,
+      range: { index, length }
+    };
+  }
+  let command = "";
   if (length > 0) {
-    selection = editor.__quill.getText(index, length);
+    command = editor.__quill.getText(index, length);
   } else {
     const start = (index > ACTION_SELECTION_EXPAND_LENGTH) ?
                   (index - ACTION_SELECTION_EXPAND_LENGTH) :
@@ -26,20 +33,22 @@ function generate_action(action, editor, { index, length }, api) {
     const secondHalf = editor.__quill.getText(index, ACTION_SELECTION_EXPAND_LENGTH);
     const firstHalfMatch = (firstHalf.match(/\S+$/) || [""])[0];
     const secondHalfMatch = (secondHalf.match(/^\S+/) || [""])[0];
-    selection = `${firstHalfMatch}${secondHalfMatch}`;
+    command = `${firstHalfMatch}${secondHalfMatch}`;
   }
   api.action({
     type: action,
     id: editor.__id,
     index,
-    selection
+    command,
+    selection: oldSelection
   });
 }
 
 export class Window {
   constructor(api) {
     this.el = el(".window");
-    this.rows = listPool(Row, "id", api);
+    this.rows = listPool(Row, "id", { api, root: this });
+    this.currentSelection = null;
 
     api.init(data => {
       this.update(data);
@@ -59,6 +68,10 @@ export class Window {
       if (!action) { return ;}
       const editor = this.findEditor(event);
       if ((!editor) || (!editor.__quill)) { return; }
+      // getSelection might refresh current selection and trigger onselection(),
+      // however we want to keep original selection here, hence we are keeping
+      // a copy of the original value here.
+      const oldSelection = this.currentSelection;
       const selection = editor.__quill.getSelection();
       // When mouseup lands on a different editor from mousedown, selection
       // would return null.
@@ -79,7 +92,7 @@ export class Window {
         selection.length = 0;
       }
 
-      generate_action(action, editor, selection, api);
+      generate_action(action, editor, selection, api, oldSelection);
     });
     this.el.addEventListener("touchstart", event => {
       if (event.touches.length == 1) {
@@ -92,6 +105,7 @@ export class Window {
       } else {
         if (!this.touchState) { return; }
         const { editor, position } = this.touchState;
+        const oldSelection = this.currentSelection;
         const selection = editor.__quill.getSelection();
         if (!selection) { return; }
         const distance1 = Math.pow(position.pageX - event.touches[0].pageX, 2) +
@@ -103,7 +117,7 @@ export class Window {
         const actionKey = (event.touches[source].pageY < event.touches[target].pageY) ? 1 : 2;
         const action = ACTIONS[actionKey];
 
-        generate_action(action, editor, selection, api);
+        generate_action(action, editor, selection, api, oldSelection);
       }
     });
     if (!IS_MOBILE) {
@@ -172,6 +186,12 @@ export class Window {
     }
   }
 
+  onselection(id, selection) {
+    if (selection) {
+      this.currentSelection = { id, range: selection };
+    }
+  }
+
   verify(hashes) {
     const { lookup } = this.rows;
     Object.keys(hashes).forEach(function(contentId) {
@@ -186,7 +206,7 @@ export class Window {
 }
 
 export class Row {
-  constructor(api, { id }) {
+  constructor({ api, root }, { id }) {
     this.id = id;
     this.resizer = el(".resizer", {draggable: true});
     this.label = el(".label");
@@ -205,6 +225,8 @@ export class Row {
     this.label.__version = 0;
     this.content.__version = 0;
 
+    this.contentEditor.lastSelection = null;
+
     this.labelEditor.on("text-change", (delta, _oldDelta, source) => {
       if (source === "user") {
         api.textchange(this.label.__id, delta, this.label.__version);
@@ -214,6 +236,12 @@ export class Row {
       if (source === "user") {
         api.textchange(this.content.__id, delta, this.content.__version);
       }
+    });
+    this.labelEditor.on("selection-change", (selection) => {
+      root.onselection(this.label.__id, selection);
+    });
+    this.contentEditor.on("selection-change", (selection) => {
+      root.onselection(this.content.__id, selection);
     });
   }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -23,10 +24,11 @@ import (
 )
 
 const (
-	DefaultLabel   = " | New Del Put"
-	UserClientId   = 0
-	SystemClientId = 1
-	MetaFileId     = 0
+	DefaultLabel          = " | New Del Put"
+	UserClientId          = 0
+	SystemClientId        = 1
+	MetaFileId            = 0
+	CommandTimeoutSeconds = 10
 )
 
 func idToMeta(id uint32) delta.Delta {
@@ -338,8 +340,8 @@ func (c *Connection) applyChanges(changes []ot.MultiFileChange) {
 func (c *Connection) execute(action Action) error {
 	if action.Type == "search" {
 		var path string
-		if strings.HasPrefix(action.Selection, "/") {
-			path = action.Selection
+		if strings.HasPrefix(action.Command, "/") {
+			path = action.Command
 		} else {
 			labelContent := c.Server.CurrentChange(action.LabelId())
 			if labelContent == nil {
@@ -351,7 +353,7 @@ func (c *Connection) execute(action Action) error {
 			if !strings.HasSuffix(path, "/") {
 				path += "/../"
 			}
-			path += action.Selection
+			path += action.Command
 		}
 		path = filepath.Clean(path)
 		stat, err := os.Stat(path)
@@ -372,27 +374,68 @@ func (c *Connection) execute(action Action) error {
 		}
 		return nil
 	} else if action.Type == "execute" {
-		switch action.Selection {
+		switch action.Command {
 		case "New":
 			return c.CreateDummyFile()
 		case "Del":
 			c.deleteFile(action)
 			return nil
 		default:
-			cmds := strings.Split(action.Selection, " ")
-			if len(cmds) > 0 {
+			cmds := strings.Split(strings.TrimSpace(action.Command), " ")
+			if len(cmds) > 0 && len(cmds[0]) > 0 {
+				firstChar := string(cmds[0][0])
+				pipeSelectionToStdin := firstChar == "|" || firstChar == ">"
+				pipeStdoutToSelection := firstChar == "|" || firstChar == "<"
+				if pipeSelectionToStdin || pipeStdoutToSelection {
+					cmds[0] = cmds[0][1:]
+				}
 				path, err := exec.LookPath(cmds[0])
 				if err == nil {
-					cmd := exec.Command(path, cmds[1:]...)
+					var cancelCmd context.CancelFunc
+					ctx := context.Background()
+					if pipeStdoutToSelection {
+						ctx, cancelCmd = context.WithTimeout(ctx, CommandTimeoutSeconds*time.Second)
+					}
+					cmd := exec.CommandContext(ctx, path, cmds[1:]...)
+					if pipeSelectionToStdin {
+						d := c.Server.CurrentChange(action.Selection.Id).Change.Delta.Slice(
+							int(action.Selection.Range.Index),
+							int(action.Selection.Range.Index+action.Selection.Range.Length))
+						cmd.Stdin = strings.NewReader(DeltaToString(*d))
+					}
 					w := &errorsBufferWriter{
 						path: filepath.Dir(extractPath(*c.Server.CurrentChange(action.LabelId()).Change.Delta)),
 						c:    c,
 					}
-					cmd.Stdout = w
 					cmd.Stderr = w
+					var stdoutBuffer bytes.Buffer
+					if pipeStdoutToSelection {
+						cmd.Stdout = &stdoutBuffer
+					} else {
+						cmd.Stdout = w
+					}
 					err = cmd.Start()
 					if err != nil {
 						return err
+					}
+					if pipeStdoutToSelection {
+						// Wait for command to finish first
+						err = cmd.Wait()
+						if err != nil {
+							return err
+						}
+						cancelCmd()
+						// Grab stdout data and modify selection
+						c.Server.Submit(SystemClientId, ot.MultiFileChange{
+							Id: action.Selection.Id,
+							Change: ot.Change{
+								Version: c.Server.CurrentChange(action.Selection.Id).Change.Version,
+								Delta: delta.New(nil).
+									Retain(int(action.Selection.Range.Index), nil).
+									Delete(int(action.Selection.Range.Length)).
+									Insert(string(stdoutBuffer.String()), nil),
+							},
+						})
 					}
 				}
 			}

@@ -4,11 +4,22 @@ import (
 	"github.com/xxuejie/go-delta-ot/ot"
 )
 
+type Range struct {
+	Index  uint32 `json:"index"`
+	Length uint32 `json:"length"`
+}
+
+type Selection struct {
+	Id    uint32 `json:"id"`
+	Range Range  `json:"range"`
+}
+
 type Action struct {
-	Id        uint32 `json:"id"`
-	Type      string `json:"type"`
-	Index     uint32 `json:"index"`
-	Selection string `json:"selection"`
+	Id        uint32    `json:"id"`
+	Type      string    `json:"type"`
+	Index     uint32    `json:"index"`
+	Command   string    `json:"command"`
+	Selection Selection `json:"selection"`
 }
 
 func (a Action) LabelId() uint32 {
