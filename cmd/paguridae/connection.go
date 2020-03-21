@@ -300,12 +300,15 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 				hashes = make(map[uint32]string)
 				for _, change := range changes {
 					if _, ok := hashes[change.Id]; !ok {
-						content := DeltaToString(*c.Server.CurrentChange(change.Id).Change.Delta)
-						// QuillJS always add a new line at the very end of editor
-						if change.Id != MetaFileId {
-							content += "\n"
+						latestContent := *c.Server.CurrentChange(change.Id)
+						if latestContent.Change.Version == change.Change.Version {
+							content := DeltaToString(*latestContent.Change.Delta)
+							// QuillJS always add a new line at the very end of editor
+							if change.Id != MetaFileId {
+								content += "\n"
+							}
+							hashes[change.Id] = fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
 						}
-						hashes[change.Id] = fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
 					}
 				}
 			}
@@ -333,6 +336,9 @@ func (c *Connection) deleteFile(action Action) {
 
 func (c *Connection) applyChanges(changes []ot.MultiFileChange) {
 	for _, change := range changes {
+		if change.Change.Delta == nil {
+			log.Printf("Ack changes submitted by client, this should not happen!")
+		}
 		c.Server.Submit(UserClientId, change)
 	}
 }

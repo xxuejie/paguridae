@@ -288,16 +288,16 @@ export class Api {
   }
 
   textchange(id, delta, version) {
-    this.buffered_changes[id] = this.buffered_changes[id] || { id: id, version: version };
-    if (this.buffered_changes[id].version !== version) {
+    this.buffered_changes[id] = this.buffered_changes[id] || { id: id, change: { version: version } };
+    if (this.buffered_changes[id].change.version !== version) {
       signalError("Version mismatch, something is wrong!");
       return;
     }
-    const aggregated = (this.buffered_changes[id].delta || new Delta()).compose(delta);
+    const aggregated = (this.buffered_changes[id].change.delta || new Delta()).compose(delta);
     if (aggregated.ops.length === 0) {
       delete this.buffered_changes[id];
     } else {
-      this.buffered_changes[id].delta = aggregated;
+      this.buffered_changes[id].change.delta = aggregated;
     }
   }
 
