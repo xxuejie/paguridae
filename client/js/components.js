@@ -196,6 +196,10 @@ export class Window {
 
   update({layout, rows}) {
     if (layout) {
+      // Saving scroll positions for existing rows when layout needs changes.
+      this.rows.views.forEach(row => {
+        row.saveScroll();
+      });
       const rowData = [].concat(...layout.columns.map(function({rows}) {
         return rows;
       }));
@@ -224,6 +228,13 @@ export class Window {
         if (row) {
           row.update({ change });
         }
+      });
+    }
+
+    if (layout) {
+      // Restoring scroll positions
+      this.rows.views.forEach(row => {
+        row.restoreScroll();
       });
     }
   }
@@ -255,6 +266,7 @@ export class Row {
     this.header = el(".header", [this.resizer, this.label]);
     this.content = el(".content");
     this.el = el(".row", [this.header, this.content]);
+    this.scrollPosition = null;
 
     this.labelEditor = new Quill(this.label);
     this.contentEditor = new Quill(this.content);
@@ -320,6 +332,29 @@ export class Row {
       verifyContent(this.contentEditor.getContents(), hash);
     } else {
       console.log("Unknown ID: " + id + " for row: " + this.id);
+    }
+  }
+
+  saveScroll() {
+    const scrollElement = this.content.querySelector(".ql-editor");
+    const top = scrollElement ? Math.round(scrollElement.scrollTop) : 0;
+    if (top > 0) {
+      const count = scrollElement.children.length;
+      for (let i = 0; i < count; i++) {
+        const child = scrollElement.children[i];
+        if ((i === count - 1) ||
+            (Math.round(scrollElement.children[i + 1].offsetTop) > top)) {
+          this.scrollPosition = child.offsetTop;
+          return;
+        }
+      }
+    }
+    this.scrollPosition = null;
+  }
+
+  restoreScroll() {
+    if (this.scrollPosition) {
+      this.content.querySelector(".ql-editor").scrollTo(0, this.scrollPosition);
     }
   }
 }
