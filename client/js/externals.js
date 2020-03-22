@@ -27,3 +27,12 @@ export function verifyContent(delta, hash) {
       console.log("Digest generation error: " + e);
     });
 }
+
+export const clipboard = window.navigator.clipboard || {
+  writeText: (_content) => {
+    return Promise.reject(new Error("Clipboard is not available!"));
+  },
+  readText: () => {
+    return Promise.reject(new Error("Clipboard is not available!"));
+  }
+};

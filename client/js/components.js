@@ -1,4 +1,4 @@
-import { redom, verifyContent, Quill } from "./externals.js";
+import { clipboard, redom, verifyContent, Quill } from "./externals.js";
 
 const {el, listPool, setChildren, setStyle} = redom;
 const Delta = Quill.import("delta");
@@ -49,6 +49,8 @@ export class Window {
     this.el = el(".window");
     this.rows = listPool(Row, "id", { api, root: this });
     this.currentSelection = null;
+    this.leftButtonDown = false;
+    this.chordProcessed = false;
 
     api.init(data => {
       this.update(data);
@@ -57,15 +59,55 @@ export class Window {
     });
 
     this.el.addEventListener("mousedown", event => {
-      const action = this.extractAction(event);
-      if (!action) { return ;}
       const editor = this.findEditor(event);
       if ((!editor) || (!editor.__quill)) { return; }
+      if (this.leftButtonDown) {
+        if (event.button === 1 || (event.button === 2 && event.ctrlKey)) {
+          const selection = editor.__quill.getSelection();
+          if (selection) {
+            const content = editor.__quill.getText(selection.index, selection.length);
+            clipboard.writeText(content).then(() => {
+              editor.__quill.updateContents(
+                new Delta().retain(selection.index).delete(selection.length), "user");
+              editor.__quill.setSelection(selection.index, 0, "user");
+            }).catch((e) => {
+              console.log("Clipboard accessing error: " + e);
+            });
+          }
+          this.chordProcessed = true;
+          return;
+        } else if (event.button === 2) {
+          clipboard.readText().then(content => {
+            content = content || "";
+            const selection = editor.__quill.getSelection();
+            editor.__quill.updateContents(
+              new Delta().retain(selection.index)
+                         .delete(selection.length)
+                         .insert(content),
+              "user");
+            editor.__quill.setSelection(selection.index, content.length, "user");
+          }).catch((e) => {
+            console.log("Clipboard accessing error: " + e);
+          });
+          this.chordProcessed = true;
+          return;
+        }
+      }
+      this.leftButtonDown = event.button === 0;
+      const action = this.extractAction(event);
+      if (!action) { return; }
       this.mousedownSelection = editor.__quill.getSelection();
     });
     this.el.addEventListener("mouseup", event => {
+      if (event.button === 0) {
+        this.leftButtonDown = false;
+      }
+      if (this.chordProcessed) {
+        this.chordProcessed = false;
+        return;
+      }
       const action = this.extractAction(event);
-      if (!action) { return ;}
+      if (!action) { return; }
       const editor = this.findEditor(event);
       if ((!editor) || (!editor.__quill)) { return; }
       // getSelection might refresh current selection and trigger onselection(),
