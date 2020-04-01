@@ -16,5 +16,6 @@ A Web IDE hugely inspired from [Acme](http://acme.cat-v.org/) that is almost a c
 ## Future deps
 
 * [chroma](https://github.com/alecthomas/chroma) for syntax highlighting
-* [go-sixel](https://github.com/mattn/go-sixel) for sixel support, Image embed in Quill already supports inlined image, all we need to do is convert sixel to png and inline in an embed
 * Need to write a small library that supports slicing a large file into a small delta section with custom embed for holes at each end
+
+* [pty](https://github.com/creack/pty) in a new win command for RAW mode support
