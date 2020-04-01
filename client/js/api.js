@@ -315,4 +315,9 @@ export class Api {
     this.layout.move(id, x, y);
     this.onchange({ layout: { columns: this.layout.columns } });
   }
+
+  sizechange(sizes) {
+    // TODO: update sizes into layout file
+    console.log(sizes);
+  }
 }

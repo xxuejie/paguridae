@@ -1,4 +1,4 @@
-import { clipboard, redom, verifyContent, Quill } from "./externals.js";
+import { clipboard, document, redom, verifyContent, Quill } from "./externals.js";
 
 const {el, listPool, setChildren, setStyle} = redom;
 const Delta = Quill.import("delta");
@@ -46,11 +46,16 @@ function generate_action(action, editor, { index, length }, api, oldSelection) {
 
 export class Window {
   constructor(api) {
+    this.api = api;
     this.el = el(".window");
     this.rows = listPool(Row, "id", { api, root: this });
     this.currentSelection = null;
     this.leftButtonDown = false;
     this.chordProcessed = false;
+
+    window.addEventListener("resize", () => {
+      this.updateEditorSizes();
+    });
 
     api.init(data => {
       this.update(data);
@@ -178,6 +183,49 @@ export class Window {
     });
   }
 
+  updateEditorSizes() {
+    const editors = document.querySelectorAll(".ql-container");
+    const editorDimensions = {};
+    let textWidth = 0;
+    let textHeight = 0;
+    for (const editor of editors) {
+      const id = editor.__id;
+      const rect = editor.getBoundingClientRect();
+      editorDimensions[id] = {
+        width: rect.width,
+        height: rect.height
+      };
+      if (textWidth === 0 || textHeight === 0) {
+        const quill = editor.__quill;
+        if (quill.getText(0, 1) !== "\n") {
+          const element = editor.querySelector(".ql-editor p");
+          if (element) {
+            const bounds = quill.getBounds(0, 1);
+            const width = bounds.right - bounds.left;
+            const height = parseFloat(window.getComputedStyle(element).lineHeight);
+            if (width > 0 && height > 0) {
+              textWidth = width;
+              textHeight = height;
+            }
+          }
+        }
+      }
+    }
+    if (textWidth === 0 || textHeight === 0) {
+      console.log("Unable to extract text metrics!");
+      return;
+    }
+    const editorSizes = {};
+    Object.keys(editorDimensions).forEach(id => {
+      const { width, height } = editorDimensions[id];
+      editorSizes[id] = {
+        columns: Math.floor(width / textWidth) || 1,
+        rows: Math.floor(height / textHeight) || 1
+      };
+    });
+    this.api.sizechange(editorSizes);
+  }
+
   extractAction(event) {
     let button = event.button;
     if (button === 0 && event.ctrlKey) {
@@ -236,6 +284,7 @@ export class Window {
       this.rows.views.forEach(row => {
         row.restoreScroll();
       });
+      this.updateEditorSizes();
     }
   }
 
