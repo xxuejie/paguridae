@@ -11,7 +11,10 @@ export function columnId() {
 
 class Layout {
   constructor() {
+    this.version = 0;
     this.data = new Delta();
+    this.sizes = {};
+    this.dirty = false;
     this.columns = [
       {
         id: columnId(),
@@ -31,13 +34,63 @@ class Layout {
   }
 
   update(changes) {
+    changes.forEach(change => {
+      this.version = Math.max(this.version, change.change.version);
+    });
     this.data = changes.reduce((data, change) => data.compose(new Delta(change.change.delta)), this.data);
     const currentIds = this._currentIds();
     const oldIds = [].concat(...this.columns.map(column => column.rows.map(row => row.id)));
     const addedIds = currentIds.filter(id => !oldIds.includes(id));
     const deletedIds = oldIds.filter(id => !currentIds.includes(id));
-    deletedIds.forEach(id => this._deleteRow(id));
-    addedIds.forEach(id => this._createRow(id));
+    deletedIds.forEach(id => {
+      this._deleteRow(id);
+      delete this.sizes[id];
+      delete this.sizes[id + 1];
+    });
+    addedIds.forEach(id => {
+      this._createRow(id);
+      this.sizes[id] = { columns: 0, rows: 0 };
+      this.sizes[id + 1] = { columns: 0, rows: 0 };
+    });
+    return addedIds.length > 0 || deletedIds.length > 0;
+  }
+
+  generateSizeChange() {
+    if (!this.dirty) {
+      return null;
+    }
+    let d = new Delta();
+    this.data.eachLine(line => {
+      const text = line.map(op => {
+        return (typeof op.insert === "string") ? op.insert : "";
+      }).join("");
+      const space = text.indexOf(" ");
+      if (space !== -1) {
+        const id = parseInt(text.substring(0, space));
+        if (this.sizes[id]) {
+          d = d.retain(space).delete(text.length - space)
+               .insert(` ${this.sizes[id].columns} ${this.sizes[id].rows}`).retain(1);
+          return;
+        }
+      }
+      d = d.retain(text.length + 1);
+    });
+    this.data = this.data.compose(d);
+    this.dirty = false;
+    return d;
+  }
+
+  updateSizes(sizes) {
+    Object.keys(sizes).forEach(id => {
+      const { columns, rows } = sizes[id];
+      if (this.sizes[id] &&
+          (this.sizes[id].columns !== columns ||
+           this.sizes[id].rows !== rows)) {
+        this.sizes[id].columns = columns;
+        this.sizes[id].rows = rows;
+        this.dirty = true;
+      }
+    });
   }
 
   move(id, x, y) {
@@ -259,8 +312,12 @@ export class Api {
           const localDelta = this.buffered_changes[change.id];
           const remoteDelta = change.change.delta;
           if (localDelta && remoteDelta) {
-            this.buffered_changes[change.id] = remoteDelta.transform(localDelta, true);
-            change.change.delta = localDelta.transform(remoteDelta, false);
+            // TODO: verify the logic here later
+            const ld = localDelta.change.delta;
+            const rd = new Delta(change.change.delta);
+            this.buffered_changes[change.id].change.delta = rd.transform(ld, true);
+            this.buffered_changes[change.id].change.version = change.change.version;
+            change.change.delta = ld.transform(rd, false);
           }
           return change;
         });
@@ -302,6 +359,10 @@ export class Api {
   }
 
   action(data) {
+    const d = this.layout.generateSizeChange();
+    if (d) {
+      this.textchange(LAYOUT_ID, d, this.layout.version);
+    }
     const payload = {
       action: data,
       changes: Object.values(this.buffered_changes)
@@ -317,7 +378,6 @@ export class Api {
   }
 
   sizechange(sizes) {
-    // TODO: update sizes into layout file
-    console.log(sizes);
+    this.layout.updateSizes(sizes);
   }
 }

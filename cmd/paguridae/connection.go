@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,10 +31,6 @@ const (
 	MetaFileId            = 0
 	CommandTimeoutSeconds = 10
 )
-
-func idToMeta(id uint32) delta.Delta {
-	return *delta.New(nil).Insert(fmt.Sprintf("%d\n", id), nil)
-}
 
 func extractPath(d delta.Delta) string {
 	return strings.SplitN(DeltaToString(d), " ", 2)[0]
@@ -130,16 +127,43 @@ func (c *Connection) GrabChanges() []ot.MultiFileChange {
 	return changes
 }
 
+func idToMeta(id uint32) delta.Delta {
+	return *delta.New(nil).Insert(fmt.Sprintf("%d 0 0\n", id), nil)
+}
+
+// TODO: see if we need to simplify this later
 func (c *Connection) refreshMetafile(newIds ...uint32) {
 	oldMeta := c.Server.CurrentChange(MetaFileId)
 	if oldMeta == nil || oldMeta.Change.Delta == nil {
 		log.Printf("Metafile does not exist, something is seriously wrong!")
 		return
 	}
+	oldInfos := make(map[uint32]string)
+	for _, line := range strings.Split(DeltaToString(*oldMeta.Change.Delta), "\n") {
+		if len(line) == 0 {
+			continue
+		}
+		pieces := strings.SplitN(line, " ", 2)
+		if len(pieces) != 2 {
+			log.Printf("Invalid split for line: %s", line)
+			return
+		}
+		i, err := strconv.ParseUint(pieces[0], 10, 32)
+		if err != nil {
+			log.Printf("Unexpected parse error: %v", err)
+			return
+		}
+		oldInfos[uint32(i)] = line
+	}
 	newMetaContent := delta.New(nil)
 	for _, change := range c.Server.AllChanges() {
 		if change.Id != MetaFileId {
-			newMetaContent = newMetaContent.Concat(idToMeta(change.Id))
+			line, ok := oldInfos[change.Id]
+			if ok {
+				newMetaContent = newMetaContent.Concat(*delta.New(nil).Insert(line, nil).Insert("\n", nil))
+			} else {
+				newMetaContent = newMetaContent.Concat(idToMeta(change.Id))
+			}
 		}
 	}
 	for _, newId := range newIds {
