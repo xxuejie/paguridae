@@ -11,7 +11,7 @@ require (
 	github.com/tdewolff/minify v2.3.6+incompatible
 	github.com/tdewolff/parse v2.3.4+incompatible // indirect
 	github.com/tdewolff/test v1.0.6 // indirect
-	github.com/xxuejie/go-delta-ot v0.0.0-20200403123701-e85e2b1c23a6
+	github.com/xxuejie/go-delta-ot v0.0.0-20200405082330-c109d451c13f
 	golang.org/x/xerrors v0.0.0-20191011141410-1b5146add898 // indirect
 	nhooyr.io/websocket v1.1.1
 )
