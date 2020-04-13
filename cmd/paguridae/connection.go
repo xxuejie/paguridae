@@ -22,6 +22,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/xxuejie/go-delta-ot/ot"
 	"nhooyr.io/websocket"
+	"xuejie.space/c/go-quill-editor"
 )
 
 const (
@@ -367,6 +368,41 @@ func (c *Connection) deleteFile(action Action) {
 	c.refreshMetafile()
 }
 
+func (c *Connection) editFile(action Action) {
+	var errorBuffer bytes.Buffer
+	completeChan := make(chan bool, 1)
+	c.Server.FetchAndChange(SystemClientId, action.Selection.Id, func(d delta.Delta) delta.Delta {
+		f := editor.NewDeltaFile(d)
+		f.Select(int64(action.Selection.Range.Index),
+			int64(action.Selection.Range.Index+action.Selection.Range.Length))
+		cmdStr := action.Command[4:]
+		cmd, err := editor.Compile(cmdStr)
+		if err != nil {
+			return *delta.New(nil)
+		}
+		err = cmd.Run(editor.Context{
+			File:    f,
+			Printer: &errorBuffer,
+		})
+		completeChan <- (err == nil)
+		if err != nil {
+			return *delta.New(nil)
+		}
+		return f.Changes()
+	})
+	if <-completeChan && errorBuffer.Len() > 0 {
+		c.newErrorBuffer(action).Write(errorBuffer.Bytes())
+	}
+}
+
+func (c *Connection) newErrorBuffer(action Action) *errorsBufferWriter {
+	return &errorsBufferWriter{
+		path: filepath.Dir(extractPath(
+			*c.Server.CurrentChange(action.LabelId()).Change.Delta)),
+		c: c,
+	}
+}
+
 func (c *Connection) applyChanges(changes []ot.MultiFileChange) {
 	for _, change := range changes {
 		if change.Change.Delta == nil {
@@ -420,6 +456,10 @@ func (c *Connection) execute(action Action) error {
 			c.deleteFile(action)
 			return nil
 		default:
+			if strings.HasPrefix(action.Command, "Edit") {
+				c.editFile(action)
+				return nil
+			}
 			cmds := strings.Split(strings.TrimSpace(action.Command), " ")
 			if len(cmds) > 0 && len(cmds[0]) > 0 {
 				firstChar := string(cmds[0][0])
@@ -442,10 +482,7 @@ func (c *Connection) execute(action Action) error {
 							int(action.Selection.Range.Index+action.Selection.Range.Length))
 						cmd.Stdin = strings.NewReader(DeltaToString(*d))
 					}
-					w := &errorsBufferWriter{
-						path: filepath.Dir(extractPath(*c.Server.CurrentChange(action.LabelId()).Change.Delta)),
-						c:    c,
-					}
+					w := c.newErrorBuffer(action)
 					cmd.Stderr = w
 					var stdoutBuffer bytes.Buffer
 					if pipeStdoutToSelection {
