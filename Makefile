@@ -1,10 +1,13 @@
 build:
 	go build ./cmd/paguridae
 
+build-static:
+	CGO_ENABLED=0 GOOS=linux go build -a -ldflags '-extldflags "-static"' ./cmd/paguridae
+
 dev: generate-static build
 	./paguridae -useLocalAsset=true -verifyContent=true
 
-prod: generate-prod-static build
+prod: generate-prod-static build-static
 
 generate-static:
 	esc -o cmd/paguridae/static.go -prefix="client" client
@@ -23,4 +26,4 @@ fmt:
 clean:
 	rm -rf paguridae cmd/paguridae/static.go
 
-.PHONY: build clean dev fmt generate-static generate-prod-static prod
+.PHONY: build build-static clean dev fmt generate-static generate-prod-static prod
