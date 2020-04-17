@@ -9,6 +9,12 @@ A Web IDE hugely inspired from [Acme](http://acme.cat-v.org/) that is almost a c
 
 # Internals
 
+## Hard Requirements
+
+* Initial page load must have only 1 request, gzipped transfer size must be less than 100KB.
+* The compiled binary must be a staticically linked one with no dependencies.
+* The binary must run on Linux OSes using x86-64, ARM/ARM64 and MIPS CPUs.
+
 ## Decisions
 
 * By default long running programs are opened the same way as acme(enter sends commands after insert point to program), a command can change to raw mode, where each key press gets send to the program immediately(questionable if we can do RAW mode detection, need to check tty in more details)
