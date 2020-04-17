@@ -2,7 +2,7 @@ build:
 	go build ./cmd/paguridae
 
 build-static:
-	CGO_ENABLED=0 GOOS=linux go build -a -ldflags '-extldflags "-static"' ./cmd/paguridae
+	CGO_ENABLED=0 GOOS=linux go build -a -ldflags '-extldflags "-static" -s -w' ./cmd/paguridae
 
 dev: generate-static build
 	./paguridae -useLocalAsset=true -verifyContent=true
