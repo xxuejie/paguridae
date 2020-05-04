@@ -38,6 +38,7 @@ func extractPath(d delta.Delta) string {
 }
 
 type Connection struct {
+	Id              string
 	BufferedChanges []ot.MultiFileChange
 	NextId          uint32
 	Server          *ot.MultiFileServer
@@ -50,7 +51,8 @@ type Connection struct {
 }
 
 func NewConnection(verifyContent bool) (*Connection, error) {
-	listenPath := fmt.Sprintf("/tmp/paguridae/%s", uuid.New().String())
+	id := uuid.New().String()
+	listenPath := fmt.Sprintf("/tmp/paguridae/%s", id)
 	listenDirectory := filepath.Dir(listenPath)
 	_, err := os.Stat(listenDirectory)
 	if os.IsNotExist(err) {
@@ -68,6 +70,7 @@ func NewConnection(verifyContent bool) (*Connection, error) {
 		server.Start()
 	}()
 	connection := &Connection{
+		Id:              id,
 		BufferedChanges: make([]ot.MultiFileChange, 0),
 		NextId:          MetaFileId + 1,
 		Server:          server,
@@ -98,6 +101,23 @@ func NewConnection(verifyContent bool) (*Connection, error) {
 	if !(<-server.NewFile(MetaFileId, *delta.New(nil))) {
 		server.Stop()
 		return nil, errors.New("Error creating metafile!")
+	}
+	// A new connection has 2 files: an empty one, and one showing
+	// contents from current directory
+	currentPath, err := os.Getwd()
+	if err != nil {
+		server.Stop()
+		return nil, err
+	}
+	err = connection.CreateDummyFile()
+	if err != nil {
+		server.Stop()
+		return nil, err
+	}
+	err = connection.CreateDirectoryListingFile(currentPath)
+	if err != nil {
+		server.Stop()
+		return nil, err
 	}
 	go func() {
 		err := Serve9PFileSystem(listener, connection.listenerSignal, server)
@@ -278,24 +298,9 @@ func (c *Connection) FindOrOpenFile(path string) (uint32, error) {
 }
 
 func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) error {
-	// A new connection has 2 files: an empty one, and one showing
-	// contents from current directory
-	currentPath, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	err = c.CreateDummyFile()
-	if err != nil {
-		return err
-	}
-	err = c.CreateDirectoryListingFile(currentPath)
-	if err != nil {
-		return err
-	}
-
+	log.Printf("Serving connection %s", c.Id)
 	messageChan := make(chan []byte)
 	errorChan := make(chan error)
-
 	go func() {
 		for {
 			_, b, err := socketConn.Read(ctx)
@@ -312,7 +317,7 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 		select {
 		case b := <-messageChan:
 			var request Request
-			err = json.Unmarshal(b, &request)
+			err := json.Unmarshal(b, &request)
 			if err != nil {
 				log.Print("Error unmarshaling message:", err)
 				continue
