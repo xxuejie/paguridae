@@ -7,7 +7,7 @@ html, body {
 }
 
 .ql-container {
-  font-family: Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace;
+  font-family: 'JetBrains Mono', Cousine, Consolas, Monaco, monospace;
   overflow: hidden;
 }
 
