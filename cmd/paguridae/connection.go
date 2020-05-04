@@ -421,18 +421,21 @@ func (c *Connection) applyChanges(changes []ot.MultiFileChange) {
 }
 
 func (c *Connection) execute(action Action) error {
+	var labelPath string
+	labelContent := c.Server.CurrentChange(action.LabelId())
+	if labelContent == nil {
+		return fmt.Errorf("Cannot find label file: %d, something must be wrong", action.LabelId())
+	}
+	if labelContent.Change.Delta != nil {
+		labelPath = extractPath(*labelContent.Change.Delta)
+	}
+
 	if action.Type == "search" {
 		var path string
 		if strings.HasPrefix(action.Command, "/") {
 			path = action.Command
 		} else {
-			labelContent := c.Server.CurrentChange(action.LabelId())
-			if labelContent == nil {
-				return fmt.Errorf("Cannot find label file: %d, something must be wrong", action.LabelId())
-			}
-			if labelContent.Change.Delta != nil {
-				path = extractPath(*labelContent.Change.Delta)
-			}
+			path = labelPath
 			if !strings.HasSuffix(path, "/") {
 				path += "/../"
 			}
@@ -484,6 +487,17 @@ func (c *Connection) execute(action Action) error {
 						ctx, cancelCmd = context.WithTimeout(ctx, CommandTimeoutSeconds*time.Second)
 					}
 					cmd := exec.CommandContext(ctx, path, cmds[1:]...)
+					// acmeaddr is different from paguridaesaddr. acmeaddr describes the command
+					// argument sent via mouse chording, while paguridaesaddr describes the addr
+					// for selected texts passed in via pipes. Later if we decide to add mouse
+					// chording, we can then include acmeaddr here.
+					cmd.Env = append(os.Environ(),
+						fmt.Sprintf("winid=%d", action.Id),
+						fmt.Sprintf("%%=%s", labelPath),
+						fmt.Sprintf("samfile=%s", labelPath),
+						fmt.Sprintf("paguridaesid=%d", action.Selection.Id),
+						fmt.Sprintf("paguridaesaddr=#%d,#%d", action.Selection.Range.Index,
+							action.Selection.Range.Index+action.Selection.Range.Length))
 					if pipeSelectionToStdin {
 						d := c.Server.CurrentChange(action.Selection.Id).Change.Delta.Slice(
 							int(action.Selection.Range.Index),
