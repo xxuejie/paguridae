@@ -4,23 +4,34 @@ import (
 	"log"
 	"net"
 
-	"aqwari.net/net/styx"
+	"9fans.net/go/plan9"
 	"github.com/xxuejie/go-delta-ot/ot"
 )
 
-func Serve9PFileSystem(listener net.Listener, server *ot.MultiFileServer) error {
-	h := styx.HandlerFunc(func(s *styx.Session) {
-		for s.Next() {
-			if !server.Running() {
-				return
+func Serve9PFileSystem(listener net.Listener, quitSignal chan bool, server *ot.MultiFileServer) error {
+Loop:
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			select {
+			default:
+			case <-quitSignal:
+				// Normal exiting
+				break Loop
 			}
-			log.Printf("Server: %p, request: %v", server, *s)
+			log.Printf("Accepting error: %v", err)
+			continue
 		}
-	})
-	fileServer := styx.Server{
-		Handler: h,
+		go func(c net.Conn) {
+			for {
+				fcall, err := plan9.ReadFcall(c)
+				if err != nil {
+					log.Printf("Invalid message: %v", err)
+					return
+				}
+				log.Printf("Fcall: %s", fcall)
+			}
+		}(conn)
 	}
-	// When when the outside connection stops, it will close the listener here,
-	// triggering the 9p file server to also stop
-	return fileServer.Serve(listener)
+	return nil
 }

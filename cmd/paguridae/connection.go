@@ -43,9 +43,10 @@ type Connection struct {
 	Server          *ot.MultiFileServer
 	VerifyContent   bool
 
-	listenPath string
-	listener   net.Listener
-	mux        sync.Mutex
+	listenPath     string
+	listener       net.Listener
+	listenerSignal chan bool
+	mux            sync.Mutex
 }
 
 func NewConnection(verifyContent bool) (*Connection, error) {
@@ -73,6 +74,7 @@ func NewConnection(verifyContent bool) (*Connection, error) {
 		VerifyContent:   verifyContent,
 		listenPath:      listenPath,
 		listener:        listener,
+		listenerSignal:  make(chan bool),
 	}
 	userCreated, userUpdates := server.NewClient(UserClientId)
 	if !(<-userCreated) {
@@ -98,7 +100,7 @@ func NewConnection(verifyContent bool) (*Connection, error) {
 		return nil, errors.New("Error creating metafile!")
 	}
 	go func() {
-		err := Serve9PFileSystem(listener, server)
+		err := Serve9PFileSystem(listener, connection.listenerSignal, server)
 		if err != nil {
 			log.Printf("Error encountered in serving 9P: %v", err)
 		}
@@ -107,6 +109,7 @@ func NewConnection(verifyContent bool) (*Connection, error) {
 }
 
 func (c *Connection) Stop() {
+	close(c.listenerSignal)
 	c.listener.Close()
 	os.Remove(c.listenPath)
 	c.Server.Stop()
