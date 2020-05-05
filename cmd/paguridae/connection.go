@@ -43,6 +43,7 @@ type Connection struct {
 	NextId          uint32
 	Server          *ot.MultiFileServer
 	VerifyContent   bool
+	Flush           chan bool
 
 	listenPath     string
 	listener       net.Listener
@@ -75,6 +76,7 @@ func NewConnection(verifyContent bool) (*Connection, error) {
 		NextId:          MetaFileId + 1,
 		Server:          server,
 		VerifyContent:   verifyContent,
+		Flush:           make(chan bool),
 		listenPath:      listenPath,
 		listener:        listener,
 		listenerSignal:  make(chan bool),
@@ -331,6 +333,8 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 			timeout = 10 * time.Millisecond
 		case err := <-errorChan:
 			return err
+		case <-c.Flush:
+			timeout = 10 * time.Millisecond
 		case <-time.After(timeout):
 			timeout = timeout * 2
 		}
