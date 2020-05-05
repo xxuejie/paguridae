@@ -17,11 +17,10 @@ const (
 	PATH_TYPE_ROOT = 0x0
 	PATH_TYPE_FILE = 0x1
 
-	Q_ROOT_DIR       = 0x0
+	Q_DIR            = 0x0
 	Q_ROOT_CONS      = 0x1
 	Q_ROOT_INDEX     = 0x2
 	Q_ROOT_NEW       = 0x3
-	Q_FILE_DIR       = 0x0
 	Q_FILE_ADDR      = 0x1
 	Q_FILE_BODY      = 0x2
 	Q_FILE_CTL       = 0x3
@@ -32,6 +31,7 @@ const (
 	Q_FILE_XDATA     = 0x8
 	Q_FILE_RICH_BODY = 0x12
 	Q_FILE_RICH_DATA = 0x14
+	Q_MASK           = 0xFF
 )
 
 type fileinfo struct {
@@ -41,7 +41,7 @@ type fileinfo struct {
 }
 
 var fileinfos = map[uint32]fileinfo{
-	(PATH_TYPE_ROOT | (Q_ROOT_DIR << 8)): {
+	(PATH_TYPE_ROOT | (Q_DIR << 8)): {
 		Name: "/",
 		Type: plan9.QTDIR,
 		Perm: 0500 | plan9.DMDIR,
@@ -61,7 +61,7 @@ var fileinfos = map[uint32]fileinfo{
 		Type: plan9.QTDIR,
 		Perm: 0500 | plan9.DMDIR,
 	},
-	(PATH_TYPE_FILE | (Q_FILE_DIR << 8)): {
+	(PATH_TYPE_FILE | (Q_DIR << 8)): {
 		Name: ".",
 		Type: plan9.QTDIR,
 		Perm: 0500 | plan9.DMDIR,
@@ -294,13 +294,13 @@ func walk(start plan9.Qid, wnames []string, server *ot.MultiFileServer) []plan9.
 	results := make([]plan9.Qid, 0)
 	for _, wname := range wnames {
 		var qid *plan9.Qid
-		if start.Path == (PATH_TYPE_ROOT | (Q_ROOT_DIR << 8)) {
+		if start.Path == (PATH_TYPE_ROOT | (Q_DIR << 8)) {
 			i, err := strconv.Atoi(wname)
 			if err == nil {
 				fileId := uint32(i)
 				change := server.CurrentChange(fileId)
 				if change != nil {
-					qpath := uint32(PATH_TYPE_FILE | (Q_FILE_DIR << 8))
+					qpath := uint32(PATH_TYPE_FILE | (Q_DIR << 8))
 					fileinfo := fileinfos[qpath]
 					qid = &plan9.Qid{
 						Path: uint64(qpath) | (uint64(fileId) << 32),
@@ -313,6 +313,7 @@ func walk(start plan9.Qid, wnames []string, server *ot.MultiFileServer) []plan9.
 		if qid == nil {
 			for qpath, fileinfo := range fileinfos {
 				if start.Path&PATH_TYPE_MASK == uint64(qpath)&PATH_TYPE_MASK &&
+					(start.Path>>8)&Q_MASK == Q_DIR &&
 					wname == fileinfo.Name {
 					qid = &plan9.Qid{
 						Path: uint64(qpath),
