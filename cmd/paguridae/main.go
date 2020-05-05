@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/NYTimes/gziphandler"
 	"nhooyr.io/websocket"
@@ -39,6 +42,13 @@ func main() {
 	flag.Parse()
 	http.HandleFunc("/ws", webSocketHandler)
 	http.Handle("/", gziphandler.GzipHandler(http.FileServer(FS(*useLocalAsset))))
+	c := make(chan os.Signal)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		os.RemoveAll("/tmp/paguridae")
+		os.Exit(0)
+	}()
 	log.Printf("Starting server on port: %d", *port)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *port), nil))
 }
