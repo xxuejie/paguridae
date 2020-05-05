@@ -294,19 +294,42 @@ func walk(start plan9.Qid, wnames []string, server *ot.MultiFileServer) []plan9.
 	results := make([]plan9.Qid, 0)
 	for _, wname := range wnames {
 		var qid *plan9.Qid
-		if start.Path == (PATH_TYPE_ROOT | (Q_DIR << 8)) {
+		var fullQpath *uint64
+		if wname == ".." {
+			p := uint64(PATH_TYPE_ROOT)
+			if start.Path&PATH_TYPE_MASK == PATH_TYPE_FILE {
+				if (start.Path>>8)&Q_MASK != Q_DIR {
+					p = start.Path&(^(uint64(Q_MASK) << 8)) | (Q_DIR << 8)
+				}
+			}
+			fullQpath = &p
+		} else if wname == "." {
+			fullQpath = &start.Path
+		} else if start.Path == (PATH_TYPE_ROOT | (Q_DIR << 8)) {
 			i, err := strconv.Atoi(wname)
 			if err == nil {
-				fileId := uint32(i)
+				p := uint64(PATH_TYPE_FILE) | (uint64(Q_DIR) << 8) | (uint64(i) << 32)
+				fullQpath = &p
+			}
+		}
+		if fullQpath != nil {
+			if (*fullQpath)&PATH_TYPE_MASK == PATH_TYPE_FILE {
+				fileId := uint32((*fullQpath) >> 32)
 				change := server.CurrentChange(fileId)
 				if change != nil {
-					qpath := uint32(PATH_TYPE_FILE | (Q_DIR << 8))
-					fileinfo := fileinfos[qpath]
+					fileinfo := fileinfos[uint32(*fullQpath)]
 					qid = &plan9.Qid{
-						Path: uint64(qpath) | (uint64(fileId) << 32),
+						Path: *fullQpath,
 						Vers: change.Change.Version,
 						Type: fileinfo.Type,
 					}
+				}
+			} else {
+				fileinfo := fileinfos[uint32(*fullQpath)]
+				qid = &plan9.Qid{
+					Path: *fullQpath,
+					Vers: 0,
+					Type: fileinfo.Type,
 				}
 			}
 		}
