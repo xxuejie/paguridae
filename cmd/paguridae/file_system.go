@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os/user"
 	"strconv"
+	"time"
 
 	"9fans.net/go/plan9"
 	"github.com/xxuejie/go-delta-ot/ot"
@@ -38,9 +40,9 @@ type fileinfo struct {
 	Perm uint32
 }
 
-var fileinfos = map[uint64]fileinfo{
+var fileinfos = map[uint32]fileinfo{
 	(PATH_TYPE_ROOT | (Q_ROOT_DIR << 8)): {
-		Name: ".",
+		Name: "/",
 		Type: plan9.QTDIR,
 		Perm: 0500 | plan9.DMDIR,
 	},
@@ -117,6 +119,10 @@ var fileinfos = map[uint64]fileinfo{
 }
 
 func Serve9PFileSystem(listener net.Listener, quitSignal chan bool, server *ot.MultiFileServer) error {
+	user, err := user.Current()
+	if err != nil {
+		return err
+	}
 Loop:
 	for {
 		conn, err := listener.Accept()
@@ -216,6 +222,30 @@ Loop:
 				case plan9.Tclunk:
 					delete(openedFiles, fcall.Fid)
 					response.Type = plan9.Rclunk
+				case plan9.Tstat:
+					qid, ok := openedFiles[fcall.Fid]
+					if !ok {
+						response.Ename = fmt.Sprintf("Fid %d is not assigned!", fcall.Fid)
+						break
+					}
+					fileinfo := fileinfos[uint32(qid.Path)]
+					t := time.Now().Unix()
+					dir := plan9.Dir{
+						Type:  uint16(fileinfo.Type),
+						Dev:   0,
+						Qid:   qid,
+						Mode:  plan9.Perm(fileinfo.Perm),
+						Atime: uint32(t),
+						Mtime: uint32(t),
+						// Right now we are copying plan9port's acme behavior
+						Length: 0,
+						Name:   fileinfo.Name,
+						Uid:    user.Uid,
+						Gid:    user.Gid,
+						Muid:   user.Uid,
+					}
+					response.Stat, _ = dir.Bytes()
+					response.Type = plan9.Rstat
 				case plan9.Twalk:
 					qid, ok := openedFiles[fcall.Fid]
 					if !ok {
@@ -268,10 +298,10 @@ func walk(start plan9.Qid, wnames []string, server *ot.MultiFileServer) []plan9.
 				fileId := uint32(i)
 				change := server.CurrentChange(fileId)
 				if change != nil {
-					qpath := uint64(PATH_TYPE_FILE | (Q_FILE_DIR << 8))
+					qpath := uint32(PATH_TYPE_FILE | (Q_FILE_DIR << 8))
 					fileinfo := fileinfos[qpath]
 					qid = &plan9.Qid{
-						Path: qpath | (uint64(fileId) << 32),
+						Path: uint64(qpath) | (uint64(fileId) << 32),
 						Vers: change.Change.Version,
 						Type: fileinfo.Type,
 					}
@@ -280,10 +310,10 @@ func walk(start plan9.Qid, wnames []string, server *ot.MultiFileServer) []plan9.
 		}
 		if qid == nil {
 			for qpath, fileinfo := range fileinfos {
-				if start.Path&PATH_TYPE_MASK == qpath&PATH_TYPE_MASK &&
+				if start.Path&PATH_TYPE_MASK == uint64(qpath)&PATH_TYPE_MASK &&
 					wname == fileinfo.Name {
 					qid = &plan9.Qid{
-						Path: qpath,
+						Path: uint64(qpath),
 						Vers: 0,
 						Type: fileinfo.Type,
 					}
