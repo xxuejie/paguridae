@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"9fans.net/go/plan9"
-	"github.com/xxuejie/go-delta-ot/ot"
 )
 
 const (
@@ -118,44 +117,46 @@ var fileinfos = map[uint32]fileinfo{
 	},
 }
 
-func Serve9PFileSystem(listener net.Listener, quitSignal chan bool, server *ot.MultiFileServer) error {
+func Start9PFileSystem(c *Connection) error {
 	currentUser, err := user.Current()
 	if err != nil {
 		return err
 	}
-Loop:
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			select {
-			default:
-			case <-quitSignal:
-				// Normal exiting
-				break Loop
+	go func() {
+	Loop:
+		for {
+			conn, err := c.listener.Accept()
+			if err != nil {
+				select {
+				default:
+				case <-c.listenerSignal:
+					// Normal exiting
+					break Loop
+				}
+				log.Printf("Accepting error: %v", err)
+				continue
 			}
-			log.Printf("Accepting error: %v", err)
-			continue
+			go loop(c, conn, currentUser)
 		}
-		go loop(conn, server, currentUser)
-	}
+	}()
 	return nil
 }
 
-func loop(c net.Conn, server *ot.MultiFileServer, currentUser *user.User) {
+func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 	// Tversion
-	fcall, err := plan9.ReadFcall(c)
+	fcall, err := plan9.ReadFcall(conn)
 	if err != nil {
 		log.Printf("Error reading version message: %v", err)
-		c.Close()
+		conn.Close()
 		return
 	}
 	if fcall.Type != plan9.Tversion ||
 		fcall.Version != "9P2000" {
 		log.Printf("Invalid version message: %s", fcall)
-		c.Close()
+		conn.Close()
 		return
 	}
-	err = plan9.WriteFcall(c, &plan9.Fcall{
+	err = plan9.WriteFcall(conn, &plan9.Fcall{
 		Type:    plan9.Rversion,
 		Tag:     fcall.Tag,
 		Msize:   fcall.Msize,
@@ -163,19 +164,19 @@ func loop(c net.Conn, server *ot.MultiFileServer, currentUser *user.User) {
 	})
 	if err != nil {
 		log.Printf("Error writing version reply: %v", err)
-		c.Close()
+		conn.Close()
 		return
 	}
 	// Tauth
-	fcall, err = plan9.ReadFcall(c)
+	fcall, err = plan9.ReadFcall(conn)
 	if err != nil {
 		log.Printf("Error reading auth message: %v", err)
-		c.Close()
+		conn.Close()
 		return
 	}
 	if fcall.Type != plan9.Tauth {
 		log.Printf("Invalid auth message: %s", fcall)
-		c.Close()
+		conn.Close()
 		return
 	}
 	allocedFiles := make(map[uint32]plan9.Qid)
@@ -184,21 +185,21 @@ func loop(c net.Conn, server *ot.MultiFileServer, currentUser *user.User) {
 		Vers: 0,
 		Type: plan9.QTDIR,
 	}
-	err = plan9.WriteFcall(c, &plan9.Fcall{
+	err = plan9.WriteFcall(conn, &plan9.Fcall{
 		Type: plan9.Rauth,
 		Tag:  fcall.Tag,
 		Aqid: allocedFiles[fcall.Afid],
 	})
 	if err != nil {
 		log.Printf("Error writing auth reply: %v", err)
-		c.Close()
+		conn.Close()
 		return
 	}
 	for {
-		fcall, err := plan9.ReadFcall(c)
+		fcall, err := plan9.ReadFcall(conn)
 		if err != nil {
 			log.Printf("Invalid message: %v", err)
-			c.Close()
+			conn.Close()
 			return
 		}
 		response := plan9.Fcall{
@@ -264,7 +265,11 @@ func loop(c net.Conn, server *ot.MultiFileServer, currentUser *user.User) {
 			}
 			saveNewfid := true
 			if len(fcall.Wname) > 0 {
-				qids := walk(qid, fcall.Wname, server)
+				qids, err := walk(qid, fcall.Wname, c)
+				if err != nil {
+					response.Ename = fmt.Sprintf("Error occurs in walk: %v", err)
+					break
+				}
 				if len(qids) == 0 {
 					response.Ename = fmt.Sprintf("Unable to walk to: %s", fcall.Wname[0])
 					break
@@ -281,16 +286,16 @@ func loop(c net.Conn, server *ot.MultiFileServer, currentUser *user.User) {
 			}
 			response.Type = plan9.Rwalk
 		}
-		err = plan9.WriteFcall(c, &response)
+		err = plan9.WriteFcall(conn, &response)
 		if err != nil {
 			log.Printf("Error writing auth reply: %v", err)
-			c.Close()
+			conn.Close()
 			return
 		}
 	}
 }
 
-func walk(start plan9.Qid, wnames []string, server *ot.MultiFileServer) []plan9.Qid {
+func walk(start plan9.Qid, wnames []string, c *Connection) ([]plan9.Qid, error) {
 	results := make([]plan9.Qid, 0)
 	for _, wname := range wnames {
 		var qid *plan9.Qid
@@ -310,12 +315,19 @@ func walk(start plan9.Qid, wnames []string, server *ot.MultiFileServer) []plan9.
 			if err == nil {
 				p := uint64(PATH_TYPE_FILE) | (uint64(Q_DIR) << 8) | (uint64(i) << 32)
 				fullQpath = &p
+			} else if wname == "new" {
+				i, err := c.CreateDummyFile()
+				if err != nil {
+					return nil, err
+				}
+				p := uint64(PATH_TYPE_FILE) | (uint64(Q_DIR) << 8) | (uint64(i) << 32)
+				fullQpath = &p
 			}
 		}
 		if fullQpath != nil {
 			if (*fullQpath)&PATH_TYPE_MASK == PATH_TYPE_FILE {
 				fileId := uint32((*fullQpath) >> 32)
-				change := server.CurrentChange(fileId)
+				change := c.Server.CurrentChange(fileId)
 				if change != nil {
 					fileinfo := fileinfos[uint32(*fullQpath)]
 					qid = &plan9.Qid{
@@ -348,10 +360,10 @@ func walk(start plan9.Qid, wnames []string, server *ot.MultiFileServer) []plan9.
 			}
 		}
 		if qid == nil {
-			return results
+			return results, nil
 		}
 		results = append(results, *qid)
 		start = *qid
 	}
-	return results
+	return results, nil
 }

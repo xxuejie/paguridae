@@ -111,7 +111,7 @@ func NewConnection(verifyContent bool) (*Connection, error) {
 		server.Stop()
 		return nil, err
 	}
-	err = connection.CreateDummyFile()
+	_, err = connection.CreateDummyFile()
 	if err != nil {
 		server.Stop()
 		return nil, err
@@ -121,12 +121,11 @@ func NewConnection(verifyContent bool) (*Connection, error) {
 		server.Stop()
 		return nil, err
 	}
-	go func() {
-		err := Serve9PFileSystem(listener, connection.listenerSignal, server)
-		if err != nil {
-			log.Printf("Error encountered in serving 9P: %v", err)
-		}
-	}()
+	err = Start9PFileSystem(connection)
+	if err != nil {
+		server.Stop()
+		return nil, err
+	}
 	return connection, nil
 }
 
@@ -241,9 +240,8 @@ func (c *Connection) createFile(label string, content *string) (uint32, error) {
 	return contentId, nil
 }
 
-func (c *Connection) CreateDummyFile() error {
-	_, err := c.createFile(DefaultLabel, nil)
-	return err
+func (c *Connection) CreateDummyFile() (uint32, error) {
+	return c.createFile(DefaultLabel, nil)
 }
 
 func (c *Connection) FindOrCreateDummyFile(path string) (uint32, error) {
@@ -466,7 +464,8 @@ func (c *Connection) execute(action Action) error {
 	} else if action.Type == "execute" {
 		switch action.Command {
 		case "New":
-			return c.CreateDummyFile()
+			_, err := c.CreateDummyFile()
+			return err
 		case "Del":
 			c.deleteFile(action)
 			return nil
