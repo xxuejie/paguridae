@@ -323,7 +323,10 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 				continue
 			}
 
-			c.applyChanges(request.Changes)
+			err = c.applyChanges(request.Changes)
+			if err != nil {
+				log.Print("Error applying changes:", err)
+			}
 			err = c.execute(request.Action)
 			if err != nil {
 				log.Print("Error executing action:", err)
@@ -413,13 +416,36 @@ func (c *Connection) newErrorBuffer(action Action) *errorsBufferWriter {
 	}
 }
 
-func (c *Connection) applyChanges(changes []ot.MultiFileChange) {
+func (c *Connection) runSamCommand(fileId uint32, cmd string) error {
+	compiledCmd, err := editor.Compile(cmd)
+	if err != nil {
+		return err
+	}
+	errChan := make(chan error, 1)
+	c.Server.FetchAndChange(SystemClientId, fileId, func(d delta.Delta) delta.Delta {
+		f := editor.NewDeltaFile(d)
+		errChan <- compiledCmd.Run(editor.Context{
+			File: f,
+		})
+		return f.Changes()
+	})
+	return <-errChan
+}
+
+func (c *Connection) applyChanges(changes []ot.MultiFileChange) error {
 	for _, change := range changes {
 		if change.Change.Delta == nil {
 			log.Printf("Ack changes submitted by client, this should not happen!")
 		}
 		c.Server.Submit(UserClientId, change)
+		if change.Id > 0 {
+			err := c.runSamCommand(change.Id-1, `1s/\|/|*/`)
+			if err != nil {
+				return err
+			}
+		}
 	}
+	return nil
 }
 
 func (c *Connection) execute(action Action) error {
@@ -469,6 +495,22 @@ func (c *Connection) execute(action Action) error {
 		case "Del":
 			c.deleteFile(action)
 			return nil
+		case "Put":
+			// Put command here ignores all embeds and just save texts to a file, later
+			// we can add a different command that do saves embeds in the buffer
+			if action.Id == MetaFileId || len(labelPath) == 0 {
+				return nil
+			}
+			fileContent := c.Server.CurrentChange(action.ContentId())
+			var data []byte
+			if fileContent != nil && fileContent.Change.Delta != nil {
+				data = []byte(DeltaToString(*fileContent.Change.Delta))
+			}
+			err := ioutil.WriteFile(labelPath, data, 0755)
+			if err != nil {
+				return err
+			}
+			return c.runSamCommand(action.LabelId(), `1s/\|\*/|/`)
 		default:
 			if strings.HasPrefix(action.Command, "Edit") {
 				c.editFile(action)
