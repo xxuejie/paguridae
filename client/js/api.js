@@ -302,11 +302,16 @@ export class Api {
     this.buffered_changes = {};
   }
 
+  dirtyContentIds() {
+    return Object.keys(this.buffered_changes).filter(id => id !== LAYOUT_ID && id % 2 === 0);
+  }
+
   init(onchange, onverify) {
     this.onchange = onchange;
     this.onverify = onverify;
     this.connection = new Connection(({changes, hashes}) => {
       changes = changes || [];
+      const editorChanges = {};
       if (Object.keys(this.buffered_changes).length !== 0) {
         changes = changes.map(change => {
           const localDelta = this.buffered_changes[change.id];
@@ -321,10 +326,9 @@ export class Api {
           }
           return change;
         });
+        editorChanges.dirtyContentIds = this.dirtyContentIds();
       }
-      const editorChanges = {
-        rows: changes.filter(change => change.id != LAYOUT_ID)
-      };
+      editorChanges.rows = changes.filter(change => change.id != LAYOUT_ID);
       const layoutChanges = changes.filter(change => change.id === LAYOUT_ID);
       if (layoutChanges.length > 0) {
         this.layout.update(layoutChanges);
@@ -345,6 +349,7 @@ export class Api {
   }
 
   textchange(id, delta, version) {
+    let changed = !this.buffered_changes[id];
     this.buffered_changes[id] = this.buffered_changes[id] || { id: id, change: { version: version } };
     if (this.buffered_changes[id].change.version !== version) {
       signalError("Version mismatch, something is wrong!");
@@ -352,9 +357,15 @@ export class Api {
     }
     const aggregated = (this.buffered_changes[id].change.delta || new Delta()).compose(delta);
     if (aggregated.ops.length === 0) {
+      changed = true;
       delete this.buffered_changes[id];
     } else {
       this.buffered_changes[id].change.delta = aggregated;
+    }
+    if (changed) {
+      this.onchange({
+        dirtyContentIds: this.dirtyContentIds()
+      });
     }
   }
 
@@ -369,6 +380,9 @@ export class Api {
     };
     // TODO: do we need to wait for ack?
     this.buffered_changes = {};
+    this.onchange({
+      dirtyContentIds: this.dirtyContentIds()
+    });
     this.connection.send(payload);
   }
 

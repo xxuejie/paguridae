@@ -57,6 +57,10 @@ html, body {
   width: 10px;
 }
 
+.resizer.dirty {
+  background-color: #666;
+}
+
 .label {
   flex-direction: column;
   flex: 1;

@@ -439,7 +439,7 @@ func (c *Connection) applyChanges(changes []ot.MultiFileChange) error {
 		}
 		c.Server.Submit(UserClientId, change)
 		if change.Id > 0 {
-			err := c.runSamCommand(change.Id-1, `1s/\|/|*/`)
+			err := c.runSamCommand(change.Id-1, `1s/\|\*?/|*/`)
 			if err != nil {
 				return err
 			}

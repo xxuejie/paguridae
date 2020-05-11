@@ -242,7 +242,7 @@ export class Window {
     return target;
   }
 
-  update({layout, rows}) {
+  update({layout, rows, dirtyContentIds}) {
     if (layout) {
       // Saving scroll positions for existing rows when layout needs changes.
       this.rows.views.forEach(row => {
@@ -276,6 +276,13 @@ export class Window {
         if (row) {
           row.update({ change });
         }
+      });
+    }
+
+    if (dirtyContentIds) {
+      const dirtyRows = new Set(dirtyContentIds.map(i => i - 1));
+      this.rows.views.forEach(row => {
+        row.update({dirty: dirtyRows.has(row.id)});
       });
     }
 
@@ -348,7 +355,7 @@ export class Row {
     });
   }
 
-  update({height, change}) {
+  update({height, change, dirty}) {
     if (height) {
       setStyle(this.el, {height: `${height}%`});
     }
@@ -371,6 +378,11 @@ export class Row {
           this.content.__version = version;
         }
       }
+    }
+    if (dirty) {
+      this.resizer.classList.add("dirty");
+    } else {
+      this.resizer.classList.remove("dirty");
     }
   }
 
