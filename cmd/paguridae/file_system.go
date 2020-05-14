@@ -228,6 +228,38 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 		case plan9.Tclunk:
 			delete(allocedFiles, fcall.Fid)
 			response.Type = plan9.Rclunk
+		case plan9.Topen:
+			qid, ok := allocedFiles[fcall.Fid]
+			if !ok {
+				response.Ename = fmt.Sprintf("Fid %d is not assigned!", fcall.Fid)
+				break
+			}
+			fileinfo := fileinfos[uint32(qid.Path)]
+			accepted := false
+			fcall.Mode &= ^uint8(plan9.OTRUNC | plan9.OCEXEC)
+			if fcall.Mode&(plan9.OEXEC|plan9.ORCLOSE) == 0 {
+				m := uint32(0)
+				switch fcall.Mode {
+				default:
+				case plan9.OREAD:
+					m = 0400
+				case plan9.OWRITE:
+					m = 0200
+				case plan9.ORDWR:
+					m = 0600
+				}
+				if m != 0 && fileinfo.Perm&(^uint32(plan9.DMDIR|plan9.DMAPPEND))&m == m {
+					accepted = true
+				}
+			}
+			if accepted {
+				// Right now no operation is needed for opening a file
+				response.Type = plan9.Ropen
+				response.Qid = qid
+				response.Iounit = 0
+			} else {
+				response.Ename = "Invalid permission!"
+			}
 		case plan9.Tstat:
 			qid, ok := allocedFiles[fcall.Fid]
 			if !ok {
