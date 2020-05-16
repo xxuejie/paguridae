@@ -399,11 +399,13 @@ func walk(start plan9.Qid, wnames []string, c *Connection) ([]plan9.Qid, error) 
 				p := uint64(PATH_TYPE_FILE) | (uint64(Q_DIR) << 8) | (uint64(i) << 32)
 				fullQpath = &p
 			} else if wname == "new" {
-				i, err := c.CreateDummyFile()
+				contentId, err := c.CreateDummyFile()
 				if err != nil {
 					return nil, err
 				}
-				p := uint64(PATH_TYPE_FILE) | (uint64(Q_DIR) << 8) | (uint64(i) << 32)
+				c.Flush <- true
+				labelId := contentId - 1
+				p := uint64(PATH_TYPE_FILE) | (uint64(Q_DIR) << 8) | (uint64(labelId) << 32)
 				fullQpath = &p
 			}
 		}
