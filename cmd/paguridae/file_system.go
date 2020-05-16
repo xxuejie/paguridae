@@ -502,7 +502,7 @@ func walk(start plan9.Qid, wnames []string, c *Connection) ([]plan9.Qid, error) 
 					(start.Path>>8)&Q_MASK == Q_DIR &&
 					wname == fileinfo.Name {
 					qid = &plan9.Qid{
-						Path: uint64(qpath),
+						Path: uint64(qpath) | ((start.Path >> 32) << 32),
 						Vers: 0,
 						Type: fileinfo.Type,
 					}
