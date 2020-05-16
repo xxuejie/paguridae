@@ -431,14 +431,29 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 			}
 			pathType := uint32(qid.Path) & PATH_TYPE_MASK
 			qType := uint8(qid.Path >> 8)
-			if pathType == PATH_TYPE_ROOT && qType == Q_ROOT_CONS {
-				_, err := c.newErrorBuffer(nil).Write(fcall.Data)
-				if err != nil {
-					response.Ename = fmt.Sprintf("Write error: %v", err)
-				} else {
-					c.Flush <- true
-					response.Count = uint32(len(fcall.Data))
-					response.Type = plan9.Rwrite
+			if pathType == PATH_TYPE_ROOT {
+				if qType == Q_ROOT_CONS {
+					_, err := c.newErrorBuffer(nil).Write(fcall.Data)
+					if err != nil {
+						response.Ename = fmt.Sprintf("Write error: %v", err)
+					} else {
+						c.Flush <- true
+						response.Count = uint32(len(fcall.Data))
+						response.Type = plan9.Rwrite
+					}
+				}
+			} else {
+				fileId := uint32(qid.Path >> 32)
+				switch qType {
+				case Q_FILE_ERRORS:
+					_, err := c.newErrorBuffer(&fileId).Write(fcall.Data)
+					if err != nil {
+						response.Ename = fmt.Sprintf("Write error: %v", err)
+					} else {
+						c.Flush <- true
+						response.Count = uint32(len(fcall.Data))
+						response.Type = plan9.Rwrite
+					}
 				}
 			}
 		}
