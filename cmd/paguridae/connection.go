@@ -404,15 +404,19 @@ func (c *Connection) editFile(action Action) {
 		return f.Changes()
 	})
 	if <-completeChan && errorBuffer.Len() > 0 {
-		c.newErrorBuffer(action).Write(errorBuffer.Bytes())
+		c.newErrorBuffer(&action).Write(errorBuffer.Bytes())
 	}
 }
 
-func (c *Connection) newErrorBuffer(action Action) *errorsBufferWriter {
+func (c *Connection) newErrorBuffer(action *Action) *errorsBufferWriter {
+	var path string
+	if action != nil {
+		path = filepath.Dir(extractPath(
+			*c.Server.CurrentChange(action.LabelId()).Change.Delta))
+	}
 	return &errorsBufferWriter{
-		path: filepath.Dir(extractPath(
-			*c.Server.CurrentChange(action.LabelId()).Change.Delta)),
-		c: c,
+		path: path,
+		c:    c,
 	}
 }
 
@@ -549,7 +553,7 @@ func (c *Connection) execute(action Action) error {
 							int(action.Selection.Range.Index+action.Selection.Range.Length))
 						cmd.Stdin = strings.NewReader(DeltaToString(*d))
 					}
-					w := c.newErrorBuffer(action)
+					w := c.newErrorBuffer(&action)
 					cmd.Stderr = w
 					var stdoutBuffer bytes.Buffer
 					if pipeStdoutToSelection {

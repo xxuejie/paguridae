@@ -244,7 +244,7 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 			fileinfo := fileinfos[uint32(qid.Path)]
 			accepted := false
 			fcall.Mode &= ^uint8(plan9.OTRUNC | plan9.OCEXEC)
-			if fcall.Mode&(plan9.OEXEC|plan9.ORCLOSE) == 0 {
+			if fcall.Mode != plan9.OEXEC && (fcall.Mode&plan9.ORCLOSE == 0) {
 				m := uint32(0)
 				switch fcall.Mode {
 				default:
@@ -368,6 +368,31 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 				allocedFiles[fcall.Newfid] = qid
 			}
 			response.Type = plan9.Rwalk
+		case plan9.Twrite:
+			qid, ok := allocedFiles[fcall.Fid]
+			if !ok {
+				response.Ename = fmt.Sprintf("Fid %d is not assigned!", fcall.Fid)
+				break
+			}
+			if !openedFiles[fcall.Fid] {
+				response.Ename = fmt.Sprintf("Fid %d is not opened!", fcall.Fid)
+				break
+			}
+			pathType := uint32(qid.Path) & PATH_TYPE_MASK
+			qType := uint8(qid.Path >> 8)
+			if pathType == PATH_TYPE_ROOT {
+				switch qType {
+				case Q_ROOT_CONS:
+					_, err := c.newErrorBuffer(nil).Write(fcall.Data)
+					if err != nil {
+						response.Ename = fmt.Sprintf("Write error: %v", err)
+					} else {
+						c.Flush <- true
+						response.Count = uint32(len(fcall.Data))
+						response.Type = plan9.Rwrite
+					}
+				}
+			}
 		}
 		err = plan9.WriteFcall(conn, &response)
 		if err != nil {
