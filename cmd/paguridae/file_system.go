@@ -365,6 +365,16 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 						}
 						fillRreadData(data, *fcall, &response)
 					}
+				} else {
+					fileId := uint32(qid.Path >> 32)
+					switch qType {
+					case Q_FILE_TAG:
+						change := c.Server.CurrentChange(fileId)
+						if change != nil && change.Change.Delta != nil {
+							data = []byte(DeltaToString(*change.Change.Delta))
+						}
+						fillRreadData(data, *fcall, &response)
+					}
 				}
 			}
 		case plan9.Tstat:
