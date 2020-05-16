@@ -2,13 +2,16 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os/user"
+	"sort"
 	"strconv"
 	"time"
 
 	"9fans.net/go/plan9"
+	"github.com/xxuejie/go-delta-ot/ot"
 )
 
 const (
@@ -180,6 +183,7 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 		return
 	}
 	allocedFiles := make(map[uint32]plan9.Qid)
+	openedFiles := make(map[uint32]bool)
 	allocedFiles[fcall.Afid] = plan9.Qid{
 		Path: PATH_TYPE_ROOT,
 		Vers: 0,
@@ -198,7 +202,9 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 	for {
 		fcall, err := plan9.ReadFcall(conn)
 		if err != nil {
-			log.Printf("Invalid message: %v", err)
+			if err != io.EOF {
+				log.Printf("Invalid message: %v", err)
+			}
 			conn.Close()
 			return
 		}
@@ -227,6 +233,7 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 			response.Qid = qid
 		case plan9.Tclunk:
 			delete(allocedFiles, fcall.Fid)
+			delete(openedFiles, fcall.Fid)
 			response.Type = plan9.Rclunk
 		case plan9.Topen:
 			qid, ok := allocedFiles[fcall.Fid]
@@ -253,12 +260,71 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 				}
 			}
 			if accepted {
-				// Right now no operation is needed for opening a file
+				openedFiles[fcall.Fid] = true
 				response.Type = plan9.Ropen
 				response.Qid = qid
 				response.Iounit = 0
 			} else {
 				response.Ename = "Invalid permission!"
+			}
+		case plan9.Tread:
+			qid, ok := allocedFiles[fcall.Fid]
+			if !ok {
+				response.Ename = fmt.Sprintf("Fid %d is not assigned!", fcall.Fid)
+				break
+			}
+			if !openedFiles[fcall.Fid] {
+				response.Ename = fmt.Sprintf("Fid %d is not opened!", fcall.Fid)
+				break
+			}
+			if qid.Type&plan9.QTDIR != 0 {
+				pathType := uint32(qid.Path) & PATH_TYPE_MASK
+				var data []byte
+				t := time.Now().Unix()
+				for path, fileinfo := range fileinfos {
+					if path&PATH_TYPE_MASK == pathType {
+						currentQid := plan9.Qid{
+							Path: ((qid.Path >> 32) << 32) | uint64(path),
+							Vers: qid.Vers,
+							Type: fileinfo.Type,
+						}
+						data = append(data, generateStat(currentQid, fileinfo, currentUser, t)...)
+					}
+				}
+				if pathType == PATH_TYPE_ROOT {
+					// Insert current open files to ROOT folder
+					files := &otFiles{}
+					for _, change := range c.Server.AllChanges() {
+						if change.Id%2 != 0 {
+							files.add(change)
+						}
+					}
+					sort.Sort(files)
+					for _, file := range files.files {
+						fullQpath := uint64(PATH_TYPE_FILE) | (uint64(Q_DIR) << 8) | (uint64(file.Id) << 32)
+						currentFileinfo := fileinfos[uint32(fullQpath)]
+						qid := plan9.Qid{
+							Path: fullQpath,
+							Vers: file.Change.Version,
+							Type: currentFileinfo.Type,
+						}
+						data = append(data, generateStat(qid, fileinfo{
+							Name: strconv.Itoa(int(file.Id)),
+							Type: currentFileinfo.Type,
+							Perm: currentFileinfo.Perm,
+						}, currentUser, t)...)
+					}
+				}
+				if fcall.Offset < uint64(len(data)) {
+					end := fcall.Offset + uint64(fcall.Count)
+					if end > uint64(len(data)) {
+						end = uint64(len(data))
+					}
+					response.Data = data[fcall.Offset:end]
+				}
+				response.Type = plan9.Rread
+			} else {
+				// TODO: reading files
 			}
 		case plan9.Tstat:
 			qid, ok := allocedFiles[fcall.Fid]
@@ -267,22 +333,7 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 				break
 			}
 			fileinfo := fileinfos[uint32(qid.Path)]
-			t := time.Now().Unix()
-			dir := plan9.Dir{
-				Type:  uint16(fileinfo.Type),
-				Dev:   0,
-				Qid:   qid,
-				Mode:  plan9.Perm(fileinfo.Perm),
-				Atime: uint32(t),
-				Mtime: uint32(t),
-				// Right now we are copying plan9port's acme behavior
-				Length: 0,
-				Name:   fileinfo.Name,
-				Uid:    currentUser.Uid,
-				Gid:    currentUser.Gid,
-				Muid:   currentUser.Uid,
-			}
-			response.Stat, _ = dir.Bytes()
+			response.Stat = generateStat(qid, fileinfo, currentUser, time.Now().Unix())
 			response.Type = plan9.Rstat
 		case plan9.Twalk:
 			qid, ok := allocedFiles[fcall.Fid]
@@ -359,13 +410,16 @@ func walk(start plan9.Qid, wnames []string, c *Connection) ([]plan9.Qid, error) 
 		if fullQpath != nil {
 			if (*fullQpath)&PATH_TYPE_MASK == PATH_TYPE_FILE {
 				fileId := uint32((*fullQpath) >> 32)
-				change := c.Server.CurrentChange(fileId)
-				if change != nil {
-					fileinfo := fileinfos[uint32(*fullQpath)]
-					qid = &plan9.Qid{
-						Path: *fullQpath,
-						Vers: change.Change.Version,
-						Type: fileinfo.Type,
+				// File IDs only include label IDs
+				if fileId%2 != 0 {
+					change := c.Server.CurrentChange(fileId)
+					if change != nil {
+						fileinfo := fileinfos[uint32(*fullQpath)]
+						qid = &plan9.Qid{
+							Path: *fullQpath,
+							Vers: change.Change.Version,
+							Type: fileinfo.Type,
+						}
 					}
 				}
 			} else {
@@ -398,4 +452,47 @@ func walk(start plan9.Qid, wnames []string, c *Connection) ([]plan9.Qid, error) 
 		start = *qid
 	}
 	return results, nil
+}
+
+func generateStat(qid plan9.Qid, fileinfo fileinfo, currentUser *user.User, t int64) []byte {
+	name := fileinfo.Name
+	if name == "/" {
+		name = "."
+	}
+	dir := plan9.Dir{
+		Type:  uint16(fileinfo.Type),
+		Dev:   0,
+		Qid:   qid,
+		Mode:  plan9.Perm(fileinfo.Perm),
+		Atime: uint32(t),
+		Mtime: uint32(t),
+		// Right now we are copying plan9port's acme behavior
+		Length: 0,
+		Name:   name,
+		Uid:    currentUser.Uid,
+		Gid:    currentUser.Gid,
+		Muid:   currentUser.Uid,
+	}
+	data, _ := dir.Bytes()
+	return data
+}
+
+type otFiles struct {
+	files []ot.MultiFileChange
+}
+
+func (f *otFiles) add(file ot.MultiFileChange) {
+	f.files = append(f.files, file)
+}
+
+func (f *otFiles) Len() int {
+	return len(f.files)
+}
+
+func (f *otFiles) Less(i, j int) bool {
+	return f.files[i].Id < f.files[j].Id
+}
+
+func (f *otFiles) Swap(i, j int) {
+	f.files[i], f.files[j] = f.files[j], f.files[i]
 }
