@@ -6,8 +6,10 @@ import (
 	"log"
 	"net"
 	"os/user"
+	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"9fans.net/go/plan9"
@@ -277,9 +279,9 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 				response.Ename = fmt.Sprintf("Fid %d is not opened!", fcall.Fid)
 				break
 			}
+			pathType := uint32(qid.Path) & PATH_TYPE_MASK
+			var data []byte
 			if qid.Type&plan9.QTDIR != 0 {
-				pathType := uint32(qid.Path) & PATH_TYPE_MASK
-				var data []byte
 				t := time.Now().Unix()
 				for path, fileinfo := range fileinfos {
 					if path&PATH_TYPE_MASK == pathType {
@@ -315,16 +317,55 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 						}, currentUser, t)...)
 					}
 				}
-				if fcall.Offset < uint64(len(data)) {
-					end := fcall.Offset + uint64(fcall.Count)
-					if end > uint64(len(data)) {
-						end = uint64(len(data))
-					}
-					response.Data = data[fcall.Offset:end]
-				}
-				response.Type = plan9.Rread
+				fillRreadData(data, *fcall, &response)
 			} else {
-				// TODO: reading files
+				qType := uint8(qid.Path >> 8)
+				if pathType == PATH_TYPE_ROOT {
+					switch qType {
+					case Q_ROOT_CONS:
+						fillRreadData(data, *fcall, &response)
+					case Q_ROOT_INDEX:
+						files := &otFiles{}
+						for _, change := range c.Server.AllChanges() {
+							if change.Id != 0 && change.Change.Delta != nil {
+								files.add(change)
+							}
+						}
+						sort.Sort(files)
+						for i := 0; i+1 < len(files.files); {
+							if files.files[i+1].Id != files.files[i].Id+1 {
+								// This should be unlikely to occur
+								i += 1
+								continue
+							}
+							labelContent := DeltaToString(*files.files[i].Change.Delta)
+							isDirectory := 0
+							if m, _ := regexp.MatchString(`^[^ \n\|]+\/\s+\|`, labelContent); m {
+								isDirectory = 1
+							}
+							changed := 0
+							if m, _ := regexp.MatchString(`^(?:[^ \n\|]+\s+)?(\|\*)`, labelContent); m {
+								changed = 1
+							}
+							var firstLine string
+							lines := strings.Split(labelContent, "\n")
+							if len(lines) > 0 {
+								firstLine = lines[0]
+							}
+							output := fmt.Sprintf("%16d %16d %16d %16d %16d %s\n",
+								files.files[i].Id,
+								files.files[i].Change.Delta.Length(),
+								files.files[i+1].Change.Delta.Length(),
+								isDirectory,
+								changed,
+								firstLine,
+							)
+							data = append(data, []byte(output)...)
+							i += 2
+						}
+						fillRreadData(data, *fcall, &response)
+					}
+				}
 			}
 		case plan9.Tstat:
 			qid, ok := allocedFiles[fcall.Fid]
@@ -380,17 +421,14 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 			}
 			pathType := uint32(qid.Path) & PATH_TYPE_MASK
 			qType := uint8(qid.Path >> 8)
-			if pathType == PATH_TYPE_ROOT {
-				switch qType {
-				case Q_ROOT_CONS:
-					_, err := c.newErrorBuffer(nil).Write(fcall.Data)
-					if err != nil {
-						response.Ename = fmt.Sprintf("Write error: %v", err)
-					} else {
-						c.Flush <- true
-						response.Count = uint32(len(fcall.Data))
-						response.Type = plan9.Rwrite
-					}
+			if pathType == PATH_TYPE_ROOT && qType == Q_ROOT_CONS {
+				_, err := c.newErrorBuffer(nil).Write(fcall.Data)
+				if err != nil {
+					response.Ename = fmt.Sprintf("Write error: %v", err)
+				} else {
+					c.Flush <- true
+					response.Count = uint32(len(fcall.Data))
+					response.Type = plan9.Rwrite
 				}
 			}
 		}
@@ -479,6 +517,17 @@ func walk(start plan9.Qid, wnames []string, c *Connection) ([]plan9.Qid, error) 
 		start = *qid
 	}
 	return results, nil
+}
+
+func fillRreadData(data []byte, fcall plan9.Fcall, response *plan9.Fcall) {
+	if fcall.Offset < uint64(len(data)) {
+		end := fcall.Offset + uint64(fcall.Count)
+		if end > uint64(len(data)) {
+			end = uint64(len(data))
+		}
+		response.Data = data[fcall.Offset:end]
+	}
+	response.Type = plan9.Rread
 }
 
 func generateStat(qid plan9.Qid, fileinfo fileinfo, currentUser *user.User, t int64) []byte {
