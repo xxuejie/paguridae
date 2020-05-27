@@ -302,10 +302,6 @@ export class Api {
     this.buffered_changes = {};
   }
 
-  dirtyContentIds() {
-    return Object.keys(this.buffered_changes).filter(id => id !== LAYOUT_ID && id % 2 === 0);
-  }
-
   init(onchange, onverify) {
     this.onchange = onchange;
     this.onverify = onverify;
@@ -326,7 +322,6 @@ export class Api {
           }
           return change;
         });
-        editorChanges.dirtyContentIds = this.dirtyContentIds();
       }
       editorChanges.rows = changes.filter(change => change.id != LAYOUT_ID);
       const layoutChanges = changes.filter(change => change.id === LAYOUT_ID);
@@ -364,7 +359,9 @@ export class Api {
     }
     if (changed) {
       this.onchange({
-        dirtyContentIds: this.dirtyContentIds()
+        dirtyChanges: {
+          [id]: !!this.buffered_changes[id]
+        }
       });
     }
   }
@@ -378,11 +375,13 @@ export class Api {
       action: data,
       changes: Object.values(this.buffered_changes)
     };
+    const dirtyChanges = {};
+    Object.keys(this.buffered_changes).forEach(id => {
+      dirtyChanges[id] = false;
+    });
     // TODO: do we need to wait for ack?
     this.buffered_changes = {};
-    this.onchange({
-      dirtyContentIds: this.dirtyContentIds()
-    });
+    this.onchange({ dirtyChanges });
     this.connection.send(payload);
   }
 

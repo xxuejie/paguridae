@@ -242,7 +242,7 @@ export class Window {
     return target;
   }
 
-  update({layout, rows, dirtyContentIds}) {
+  update({layout, rows, dirtyChanges}) {
     if (layout) {
       // Saving scroll positions for existing rows when layout needs changes.
       this.rows.views.forEach(row => {
@@ -279,11 +279,15 @@ export class Window {
       });
     }
 
-    if (dirtyContentIds) {
-      const dirtyRows = new Set(dirtyContentIds.map(i => i - 1));
-      this.rows.views.forEach(row => {
-        row.update({dirty: dirtyRows.has(row.id)});
-      });
+    if (dirtyChanges) {
+      const { lookup } = this.rows;
+      for (const [editorId, dirty] of Object.entries(dirtyChanges)) {
+        const id = editorId - 1 + editorId % 2;
+        const row = lookup[id];
+        if (row) {
+          row.update({ dirty });
+        }
+      }
     }
 
     if (layout) {
