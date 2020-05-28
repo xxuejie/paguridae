@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -32,11 +33,16 @@ func main() {
 	m.AddFunc("text/css", css.Minify)
 
 	for {
-		matches := regexp.MustCompile(`<link href="([^"]+)" rel="stylesheet">`).FindSubmatchIndex(content)
-		if len(matches) != 4 {
+		matches := regexp.MustCompile(`<link href="([^"]+)"(?: hash="([^"]+)")? rel="stylesheet">`).FindSubmatchIndex(content)
+		if len(matches) != 6 {
 			break
 		}
-		cssContent, err := resolveContent(string(content[matches[2]:matches[3]]))
+		var hash *string
+		if matches[4] != -1 && matches[5] != -1 {
+			h := string(content[matches[4]:matches[5]])
+			hash = &h
+		}
+		cssContent, err := resolveContent(string(content[matches[2]:matches[3]]), hash)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -55,11 +61,16 @@ func main() {
 	}
 
 	for {
-		matches := regexp.MustCompile(`<script src="(?:[^"]+)" production="([^"]+)".*><\/script>`).FindSubmatchIndex(content)
-		if len(matches) != 4 {
+		matches := regexp.MustCompile(`<script src="(?:[^"]+)" production="([^"]+)"(?: hash="([^"]+)")?.*><\/script>`).FindSubmatchIndex(content)
+		if len(matches) != 6 {
 			break
 		}
-		jsContent, err := resolveContent(string(content[matches[2]:matches[3]]))
+		var hash *string
+		if matches[4] != -1 && matches[5] != -1 {
+			h := string(content[matches[4]:matches[5]])
+			hash = &h
+		}
+		jsContent, err := resolveContent(string(content[matches[2]:matches[3]]), hash)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -85,14 +96,26 @@ func main() {
 	}
 }
 
-func resolveContent(uri string) ([]byte, error) {
+func resolveContent(uri string, expectedHash *string) ([]byte, error) {
 	if strings.HasPrefix(uri, "http") {
 		// Remote file
 		resp, err := http.Get(uri)
 		if err != nil {
 			return nil, err
 		}
-		return ioutil.ReadAll(resp.Body)
+		content, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		actualHash := fmt.Sprintf("%x", sha256.Sum256(content))
+		if expectedHash != nil {
+			if actualHash != *expectedHash {
+				return nil, fmt.Errorf("Hash mismatch for URI %s! Expected: %s, actual: %s", uri, *expectedHash, actualHash)
+			}
+		} else {
+			log.Printf("Fetching content from uri %s, hash: %s", uri, actualHash)
+		}
+		return content, nil
 	} else {
 		// Local file
 		path := filepath.Clean(fmt.Sprintf("%s/../%s", *inputFile, uri))
