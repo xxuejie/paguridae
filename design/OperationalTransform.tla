@@ -1,4 +1,12 @@
 ------------------------ MODULE OperationalTransform ------------------------
+(***************************************************************************)
+(* This module specifies the Operational Transform based syncing protocol  *)
+(* used between the server and multiple clients in paguridate. Each        *)
+(* individual session should have its own instance of OT as described in   *)
+(* this module. In practice, a UUID might be associated with the whole     *)
+(* session instance, while another UUID (as the ClientIDs used in this     *)
+(* spec) shall be used to identify each client.                            *)
+(***************************************************************************)
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANT ClientIDs, N
@@ -105,11 +113,14 @@ UpdateClientStateOnServer(clientAck, changes, oldState) ==
 TypeOK == /\ Server \in [changes : Seq(Change),
                          clients : [ClientIDs -> ClientState]]
           /\ Clients \in [ClientIDs -> [local : Seq(Change),
+                                        changes : Seq(Change),
                                         state : ClientState]]
           /\ Connections \in Seq(ClientIDs \X SendMessage \X ReceiveMessage)
           /\ Len(Server.changes) <= TotalChanges
           /\ \A c \in DOMAIN Clients :
                 /\ ValidChangeSeq(SubmittedChanges(c))
+                /\ \A i \in 1..Len(Clients[c].changes) :
+                    Server.changes[i] = Clients[c].changes[i]
                 /\ Clients[c].state.ack <= Len(Server.changes)
                 /\ Clients[c].state.last <= N
                 /\ Server.clients[c].ack <= Clients[c].state.ack
@@ -123,6 +134,7 @@ vars == << Server, Clients, Connections >>
 Init == /\ Server = [changes |-> << >>,
                      clients |-> [c \in ClientIDs |-> EmptyState]]
         /\ Clients = [c \in ClientIDs |-> [local |-> << >>,
+                                           changes |-> << >>,
                                            state |-> EmptyState]]
         /\ Connections = << >>
 
@@ -163,7 +175,8 @@ SubmitChange ==
                      change == [client |-> c, version |-> version]
                      changes == Append(oldClient.local, change)
                      subState == [oldClient.state EXCEPT !.last = version]
-                     client == [local |-> changes, state |-> subState]
+                     client == [oldClient EXCEPT !.local = changes,
+                                                 !.state = subState]
                      message == UpdateClientMessage(c, client)
                  IN /\ Clients' = [Clients EXCEPT ![c] = client]
                     /\ Connections' = UpdateConnection(c, message,
@@ -210,7 +223,8 @@ Update ==
                ack == MaxVersion(oldState.ack, changes)
                newState == [oldState EXCEPT !.ack = ack]
                newClient == [local |-> oldChanges \o changes,
-                             state |-> newState]
+                             state |-> newState,
+                             changes |-> oldClient.changes \o changes]
                newMessage == UpdateClientMessage(c, newClient)
            IN /\ Clients' = [Clients EXCEPT ![c] = newClient]
               /\ Connections' = UpdateConnection(c, newMessage, Connections)
