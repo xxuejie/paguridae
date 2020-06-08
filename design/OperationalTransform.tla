@@ -17,7 +17,7 @@ VARIABLES Server, Clients, Connections
 (***************************************************************************)
 (* Types                                                                   *)
 (***************************************************************************)
-Change == [client : ClientIDs, version : Nat \ {0}]
+Change == [client : ClientIDs, version : Nat \ {0}, base : Nat]
 ClientState == [ack : Nat, last : Nat]
 SendMessage == [ack : Nat, changes : Seq(Change)]
 ReceiveMessage == [changes : Seq(Change)]
@@ -31,7 +31,8 @@ ValidChangeSeq(changes) ==
     /\ \A i \in 1..Len(changes) :
         changes[i].version <= N
     /\ \A i \in 1..Len(changes) - 1 :
-        changes[i].version + 1 = changes[i + 1].version
+        /\ changes[i].version + 1 = changes[i + 1].version
+        /\ changes[i].base < changes[i + 1].base
 
 SubmittedChanges(client) ==
     SelectSeq(Server.changes, LAMBDA change: change.client = client)
@@ -117,7 +118,9 @@ TypeOK == /\ Server \in [changes : Seq(Change),
                                         state : ClientState]]
           /\ Connections \in Seq(ClientIDs \X SendMessage \X ReceiveMessage)
           /\ Len(Server.changes) <= TotalChanges
+          /\ \A i \in 1..Len(Server.changes) : i > Server.changes[i].base
           /\ \A c \in DOMAIN Clients :
+                /\ Clients[c].state.ack = Len(Clients[c].changes)
                 /\ ValidChangeSeq(SubmittedChanges(c))
                 /\ \A i \in 1..Len(Clients[c].changes) :
                     Server.changes[i] = Clients[c].changes[i]
@@ -172,7 +175,8 @@ SubmitChange ==
         /\ LET oldClient == Clients[c]
            IN /\ oldClient.state.last < N
               /\ LET version == oldClient.state.last + 1
-                     change == [client |-> c, version |-> version]
+                     change == [client |-> c, version |-> version,
+                                base |-> oldClient.state.ack]
                      changes == Append(oldClient.local, change)
                      subState == [oldClient.state EXCEPT !.last = version]
                      client == [oldClient EXCEPT !.local = changes,
