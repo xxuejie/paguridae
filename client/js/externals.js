@@ -1,7 +1,11 @@
 export const document = window.document;
 export const redom = window.redom;
 export const Quill = window.Quill;
+export const WebSocket = window.WebSocket;
+export const addEventListener = window.addEventListener;
+export const getComputedStyle = window.getComputedStyle;
 export const signalError = window.alert;
+export const setTimeout = window.setTimeout;
 
 const subtle = window.crypto && window.crypto.subtle;
 
@@ -36,3 +40,12 @@ export const clipboard = window.navigator.clipboard || {
     return Promise.reject(new Error("Clipboard is not available!"));
   }
 };
+
+export const IS_MOBILE = /Android|iPhone|iPad/i.test(window.navigator.userAgent);
+
+export function windowDimension() {
+  return {
+    width: window.innerWidth,
+    height: window.innerWidth
+  };
+}
