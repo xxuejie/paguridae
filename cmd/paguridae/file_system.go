@@ -374,6 +374,12 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 							data = []byte(DeltaToString(*change.Change.Delta))
 						}
 						fillRreadData(data, *fcall, &response)
+					case Q_FILE_BODY:
+						change := c.Server.CurrentChange(fileId + 1)
+						if change != nil && change.Change.Delta != nil {
+							data = []byte(DeltaToString(*change.Change.Delta))
+						}
+						fillRreadData(data, *fcall, &response)
 					}
 				}
 			}
@@ -454,6 +460,16 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 						response.Count = uint32(len(fcall.Data))
 						response.Type = plan9.Rwrite
 					}
+				case Q_FILE_TAG:
+					c.Server.Append(SystemClientId, fileId, string(fcall.Data))
+					c.Flush <- true
+					response.Count = uint32(len(fcall.Data))
+					response.Type = plan9.Rwrite
+				case Q_FILE_BODY:
+					c.Server.Append(SystemClientId, fileId+1, string(fcall.Data))
+					c.Flush <- true
+					response.Count = uint32(len(fcall.Data))
+					response.Type = plan9.Rwrite
 				}
 			}
 		}
