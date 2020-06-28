@@ -5,6 +5,7 @@ require (
 	github.com/NYTimes/gziphandler v1.1.1
 	github.com/fmpwizard/go-quilljs-delta v0.0.6-0.20190628042138-9bdce66302c2
 	github.com/google/uuid v1.1.1
+	github.com/mssola/user_agent v0.5.2
 	github.com/sergi/go-diff v1.1.0
 	github.com/tdewolff/minify v2.3.6+incompatible
 	github.com/tdewolff/parse v2.3.4+incompatible // indirect

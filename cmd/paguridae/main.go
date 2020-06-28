@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/NYTimes/gziphandler"
+	"github.com/mssola/user_agent"
 	"golang.org/x/crypto/acme/autocert"
 	"nhooyr.io/websocket"
 )
@@ -59,10 +60,30 @@ func makeServerFromMux(mux *http.ServeMux) *http.Server {
 	}
 }
 
+var SupportedBrowsers = map[string]bool{
+	"Chrome": true,
+	"Chromium": true,
+	"Edge": true,
+	"Firefox": true,
+	"Safari": true,
+}
+
+func userAgentTester(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ua := user_agent.New(r.UserAgent())
+		browser, _ := ua.Browser()
+		if !SupportedBrowsers[browser] {
+			fmt.Fprintf(w, "Your browser is not supported! Please use a modern browser such as Chrome, Firefox, Edge or safari.")
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
 func makeHTTPServer() *http.Server {
 	mux := &http.ServeMux{}
 	mux.HandleFunc("/ws", webSocketHandler)
-	mux.Handle("/", gziphandler.GzipHandler(http.FileServer(FS(*useLocalAsset))))
+	mux.Handle("/", userAgentTester(gziphandler.GzipHandler(http.FileServer(FS(*useLocalAsset)))))
 	return makeServerFromMux(mux)
 }
 
