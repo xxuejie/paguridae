@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"9fans.net/go/plan9"
-	"github.com/xxuejie/go-delta-ot/ot"
+	"xuejie.space/c/paguridae/pkg/ot"
 )
 
 const (
@@ -122,7 +122,7 @@ var fileinfos = map[uint32]fileinfo{
 	},
 }
 
-func Start9PFileSystem(c *Connection) error {
+func Start9PFileSystem(s *Session) error {
 	currentUser, err := user.Current()
 	if err != nil {
 		return err
@@ -130,24 +130,24 @@ func Start9PFileSystem(c *Connection) error {
 	go func() {
 	Loop:
 		for {
-			conn, err := c.listener.Accept()
+			conn, err := s.listener.Accept()
 			if err != nil {
 				select {
 				default:
-				case <-c.listenerSignal:
+				case <-s.listenerSignal:
 					// Normal exiting
 					break Loop
 				}
 				log.Printf("Accepting error: %v", err)
 				continue
 			}
-			go loop(c, conn, currentUser)
+			go loop(s, conn, currentUser)
 		}
 	}()
 	return nil
 }
 
-func loop(c *Connection, conn net.Conn, currentUser *user.User) {
+func loop(s *Session, conn net.Conn, currentUser *user.User) {
 	// Tversion
 	fcall, err := plan9.ReadFcall(conn)
 	if err != nil {
@@ -296,7 +296,7 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 				if pathType == PATH_TYPE_ROOT {
 					// Insert current open files to ROOT folder
 					files := &otFiles{}
-					for _, change := range c.Server.AllChanges() {
+					for _, change := range s.Server.AllContents() {
 						if change.Id%2 != 0 {
 							files.add(change)
 						}
@@ -307,7 +307,7 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 						currentFileinfo := fileinfos[uint32(fullQpath)]
 						qid := plan9.Qid{
 							Path: fullQpath,
-							Vers: file.Change.Version,
+							Vers: file.Version,
 							Type: currentFileinfo.Type,
 						}
 						data = append(data, generateStat(qid, fileinfo{
@@ -326,8 +326,8 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 						fillRreadData(data, *fcall, &response)
 					case Q_ROOT_INDEX:
 						files := &otFiles{}
-						for _, change := range c.Server.AllChanges() {
-							if change.Id != 0 && change.Change.Delta != nil {
+						for _, change := range s.Server.AllContents() {
+							if change.Id != 0 {
 								files.add(change)
 							}
 						}
@@ -338,7 +338,7 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 								i += 1
 								continue
 							}
-							labelContent := DeltaToString(*files.files[i].Change.Delta)
+							labelContent := DeltaToString(files.files[i].Delta)
 							isDirectory := 0
 							if m, _ := regexp.MatchString(`^[^ \n\|]+\/\s+\|`, labelContent); m {
 								isDirectory = 1
@@ -354,8 +354,8 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 							}
 							output := fmt.Sprintf("%16d %16d %16d %16d %16d %s\n",
 								files.files[i].Id,
-								files.files[i].Change.Delta.Length(),
-								files.files[i+1].Change.Delta.Length(),
+								files.files[i].Delta.Length(),
+								files.files[i+1].Delta.Length(),
 								isDirectory,
 								changed,
 								firstLine,
@@ -369,15 +369,15 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 					fileId := uint32(qid.Path >> 32)
 					switch qType {
 					case Q_FILE_TAG:
-						change := c.Server.CurrentChange(fileId)
-						if change != nil && change.Change.Delta != nil {
-							data = []byte(DeltaToString(*change.Change.Delta))
+						change := s.Server.Content(fileId)
+						if change != nil {
+							data = []byte(DeltaToString(change.Delta))
 						}
 						fillRreadData(data, *fcall, &response)
 					case Q_FILE_BODY:
-						change := c.Server.CurrentChange(fileId + 1)
-						if change != nil && change.Change.Delta != nil {
-							data = []byte(DeltaToString(*change.Change.Delta))
+						change := s.Server.Content(fileId + 1)
+						if change != nil {
+							data = []byte(DeltaToString(change.Delta))
 						}
 						fillRreadData(data, *fcall, &response)
 					}
@@ -405,7 +405,7 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 			}
 			saveNewfid := true
 			if len(fcall.Wname) > 0 {
-				qids, err := walk(qid, fcall.Wname, c)
+				qids, err := walk(qid, fcall.Wname, s)
 				if err != nil {
 					response.Ename = fmt.Sprintf("Error occurs in walk: %v", err)
 					break
@@ -439,11 +439,11 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 			qType := uint8(qid.Path >> 8)
 			if pathType == PATH_TYPE_ROOT {
 				if qType == Q_ROOT_CONS {
-					_, err := c.newErrorBuffer(nil).Write(fcall.Data)
+					_, err := s.newErrorBuffer(nil).Write(fcall.Data)
 					if err != nil {
 						response.Ename = fmt.Sprintf("Write error: %v", err)
 					} else {
-						c.Flush <- true
+						s.Flush()
 						response.Count = uint32(len(fcall.Data))
 						response.Type = plan9.Rwrite
 					}
@@ -452,22 +452,22 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 				fileId := uint32(qid.Path >> 32)
 				switch qType {
 				case Q_FILE_ERRORS:
-					_, err := c.newErrorBuffer(&fileId).Write(fcall.Data)
+					_, err := s.newErrorBuffer(&fileId).Write(fcall.Data)
 					if err != nil {
 						response.Ename = fmt.Sprintf("Write error: %v", err)
 					} else {
-						c.Flush <- true
+						s.Flush()
 						response.Count = uint32(len(fcall.Data))
 						response.Type = plan9.Rwrite
 					}
 				case Q_FILE_TAG:
-					c.Server.Append(SystemClientId, fileId, string(fcall.Data))
-					c.Flush <- true
+					s.Server.Append(fileId, []rune(string(fcall.Data)))
+					s.Flush()
 					response.Count = uint32(len(fcall.Data))
 					response.Type = plan9.Rwrite
 				case Q_FILE_BODY:
-					c.Server.Append(SystemClientId, fileId+1, string(fcall.Data))
-					c.Flush <- true
+					s.Server.Append(fileId+1, []rune(string(fcall.Data)))
+					s.Flush()
 					response.Count = uint32(len(fcall.Data))
 					response.Type = plan9.Rwrite
 				}
@@ -482,7 +482,7 @@ func loop(c *Connection, conn net.Conn, currentUser *user.User) {
 	}
 }
 
-func walk(start plan9.Qid, wnames []string, c *Connection) ([]plan9.Qid, error) {
+func walk(start plan9.Qid, wnames []string, s *Session) ([]plan9.Qid, error) {
 	results := make([]plan9.Qid, 0)
 	for _, wname := range wnames {
 		var qid *plan9.Qid
@@ -503,11 +503,11 @@ func walk(start plan9.Qid, wnames []string, c *Connection) ([]plan9.Qid, error) 
 				p := uint64(PATH_TYPE_FILE) | (uint64(Q_DIR) << 8) | (uint64(i) << 32)
 				fullQpath = &p
 			} else if wname == "new" {
-				contentId, err := c.CreateDummyFile()
+				contentId, err := s.CreateDummyFile()
 				if err != nil {
 					return nil, err
 				}
-				c.Flush <- true
+				s.Flush()
 				labelId := contentId - 1
 				p := uint64(PATH_TYPE_FILE) | (uint64(Q_DIR) << 8) | (uint64(labelId) << 32)
 				fullQpath = &p
@@ -518,12 +518,12 @@ func walk(start plan9.Qid, wnames []string, c *Connection) ([]plan9.Qid, error) 
 				fileId := uint32((*fullQpath) >> 32)
 				// File IDs only include label IDs
 				if fileId%2 != 0 {
-					change := c.Server.CurrentChange(fileId)
+					change := s.Server.Content(fileId)
 					if change != nil {
 						fileinfo := fileinfos[uint32(*fullQpath)]
 						qid = &plan9.Qid{
 							Path: *fullQpath,
-							Vers: change.Change.Version,
+							Vers: change.Version,
 							Type: fileinfo.Type,
 						}
 					}
@@ -595,10 +595,10 @@ func generateStat(qid plan9.Qid, fileinfo fileinfo, currentUser *user.User, t in
 }
 
 type otFiles struct {
-	files []ot.MultiFileChange
+	files []ot.ServerUpdate
 }
 
-func (f *otFiles) add(file ot.MultiFileChange) {
+func (f *otFiles) add(file ot.ServerUpdate) {
 	f.files = append(f.files, file)
 }
 

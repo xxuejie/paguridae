@@ -3,6 +3,7 @@ package main // import "github.com/xxuejie/paguridae"
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -28,6 +29,9 @@ var useHttps = flag.Bool("useHttps", false, "listen on 443 port for HTTPS reques
 var domain = flag.String("domain", "", "Domain to use for generating letsencrypt certificates")
 var certCache = flag.String("certCache", "./certs", "Cached directory for certificates")
 var redirectToHttps = flag.Bool("redirectoToHttps", true, "Redirect HTTP request to HTTPS request, only enabled when useHttps is also enabled")
+var sessionPurgeSeconds = flag.Int("sessionPurgeSeconds", 7200, "Seconds to wait before a session with zero connections is purged.")
+
+var sessionManager *SessionManager
 
 func webSocketHandler(w http.ResponseWriter, req *http.Request) {
 	c, err := websocket.Accept(w, req, websocket.AcceptOptions{})
@@ -38,16 +42,47 @@ func webSocketHandler(w http.ResponseWriter, req *http.Request) {
 	defer c.Close(websocket.StatusInternalError, "oops")
 	log.Print("Websocket connection established!")
 
-	connection, err := NewConnection(*verifyContent)
+	_, b, err := c.Read(req.Context())
 	if err != nil {
-		log.Print("Error creating connection:", err)
+		log.Print("Error fetching init request:", err)
 		return
 	}
+	var initRequest InitRequest
+	err = json.Unmarshal(b, &initRequest)
+	if err != nil {
+		log.Print("Error unmarshalling init request:", err)
+		return
+	}
+
+	session, err := sessionManager.FindOrCreateSession(initRequest.SessionId)
+	if err != nil {
+		log.Print("Error locating session:", err)
+		return
+	}
+	connection := NewConnection(initRequest.ClientId, session)
+
+	responseBytes, err := json.Marshal(InitResponse{
+		SessionId: session.Id(),
+		ClientId:  connection.Id(),
+	})
+	if err != nil {
+		log.Print("Error marshaling init response:", err)
+		connection.Disconnect()
+		return
+	}
+	err = c.Write(req.Context(), websocket.MessageText, responseBytes)
+	if err != nil {
+		log.Printf("Error writing init response:", err)
+		connection.Disconnect()
+		return
+	}
+
 	err = connection.Serve(req.Context(), c)
 	if err != nil {
-		log.Print("Error serving connection:", err)
+		log.Printf("Error serving connection: %v", err)
 	}
-	connection.Stop()
+
+	connection.Disconnect()
 }
 
 // HTTPS handling logic is adapted from https://github.com/kjk/go-cookbook/blob/13bbc271f500ec28f21ebc28b82ac985b7e4bffd/free-ssl-certificates/main.go
@@ -61,11 +96,11 @@ func makeServerFromMux(mux *http.ServeMux) *http.Server {
 }
 
 var SupportedBrowsers = map[string]bool{
-	"Chrome": true,
+	"Chrome":   true,
 	"Chromium": true,
-	"Edge": true,
-	"Firefox": true,
-	"Safari": true,
+	"Edge":     true,
+	"Firefox":  true,
+	"Safari":   true,
 }
 
 func userAgentTester(h http.Handler) http.Handler {
@@ -160,6 +195,7 @@ func main() {
 		httpSrv.Handler = m.HTTPHandler(httpSrv.Handler)
 	}
 
+	sessionManager = NewSessionManager(*verifyContent, *sessionPurgeSeconds)
 	httpSrv.Addr = fmt.Sprintf(":%d", *port)
 	log.Printf("Starting HTTP server on port: %d", *port)
 	log.Fatal(httpSrv.ListenAndServe())

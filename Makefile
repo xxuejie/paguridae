@@ -1,3 +1,6 @@
+test:
+	go test -v -race ./pkg/...
+
 build:
 	go build ./cmd/paguridae
 
@@ -26,4 +29,4 @@ fmt:
 clean:
 	rm -rf paguridae cmd/paguridae/static.go
 
-.PHONY: build build-static clean dev fmt generate-static generate-prod-static prod
+.PHONY: build build-static clean dev fmt generate-static generate-prod-static prod test

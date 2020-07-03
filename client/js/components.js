@@ -368,9 +368,10 @@ export class Row {
       setStyle(this.el, {height: `${height}%`});
     }
     if (change) {
+      console.log(change);
       const id = change.id;
-      const delta = change.change && change.change.delta;
-      const version = change.change && change.change.version;
+      const delta = change.delta;
+      const version = change.version;
       if (id === this.label.__id) {
         if (delta) {
           this.labelEditor.updateContents(new Delta(delta));
@@ -457,11 +458,9 @@ export class Layout {
     verifyContent(this.data, hash);
   }
 
-  update(changes) {
-    changes.forEach(change => {
-      this.version = Math.max(this.version, change.change.version);
-    });
-    this.data = changes.reduce((data, change) => data.compose(new Delta(change.change.delta)), this.data);
+  update(change) {
+    this.version = Math.max(this.version, change.version);
+    this.data = this.data.compose(new Delta(change.delta));
     const currentIds = this._currentIds();
     const oldIds = [].concat(...this.columns.map(column => column.rows.map(row => row.id)));
     const addedIds = currentIds.filter(id => !oldIds.includes(id));
@@ -477,31 +476,6 @@ export class Layout {
       this.sizes[id + 1] = { columns: 0, rows: 0 };
     });
     return addedIds.length > 0 || deletedIds.length > 0;
-  }
-
-  generateSizeChange() {
-    if (!this.dirty) {
-      return null;
-    }
-    let d = new Delta();
-    this.data.eachLine(line => {
-      const text = line.map(op => {
-        return (typeof op.insert === "string") ? op.insert : "";
-      }).join("");
-      const space = text.indexOf(" ");
-      if (space !== -1) {
-        const id = parseInt(text.substring(0, space));
-        if (this.sizes[id]) {
-          d = d.retain(space).delete(text.length - space)
-               .insert(` ${this.sizes[id].columns} ${this.sizes[id].rows}`).retain(1);
-          return;
-        }
-      }
-      d = d.retain(text.length + 1);
-    });
-    this.data = this.data.compose(d);
-    this.dirty = false;
-    return d;
   }
 
   updateSizes(sizes) {
@@ -578,13 +552,16 @@ export class Layout {
     }
   }
 
-  _currentIds() {
+  knownIds() {
     return this.data.filter(op => typeof op.insert === "string")
                            .map(op => op.insert)
                            .join("")
                            .split("\n")
-                           .map(line => parseInt(line, 10))
-                           .filter(id => id > 0 && id % 2 !== 0);
+                           .map(line => parseInt(line, 10));
+  }
+
+  _currentIds() {
+    return this.knownIds().filter(id => id > 0 && id % 2 !== 0);
   }
 
   _locateEditorById(id) {
