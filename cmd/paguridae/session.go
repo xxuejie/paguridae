@@ -483,7 +483,7 @@ func (s *Session) Execute(clientId uuid.UUID, action Action) error {
 						ctx, cancelCmd = context.WithTimeout(ctx, CommandTimeoutSeconds*time.Second)
 					}
 					cmd := exec.CommandContext(ctx, path, cmds[1:]...)
-					// acmeaddr is different from paguridaesaddr. acmeaddr describes the command
+					// acmeaddr is different from paguridae addr. acmeaddr describes the command
 					// argument sent via mouse chording, while paguridaesaddr describes the addr
 					// for selected texts passed in via pipes. Later if we decide to add mouse
 					// chording, we can then include acmeaddr here.
@@ -491,8 +491,9 @@ func (s *Session) Execute(clientId uuid.UUID, action Action) error {
 						fmt.Sprintf("winid=%d", action.Id),
 						fmt.Sprintf("%%=%s", labelPath),
 						fmt.Sprintf("samfile=%s", labelPath),
-						fmt.Sprintf("paguridaesid=%d", action.Selection.Id),
-						fmt.Sprintf("paguridaesaddr=#%d,#%d", action.Selection.Range.Index,
+						fmt.Sprintf("paguridae_session=%s", s.Id()),
+						fmt.Sprintf("paguridae_selection_id=%d", action.Selection.Id),
+						fmt.Sprintf("paguridae_selection_addr=#%d,#%d", action.Selection.Range.Index,
 							action.Selection.Range.Index+action.Selection.Range.Length))
 					if pipeSelectionToStdin {
 						d := s.Server.Content(action.Selection.Id).Delta.Slice(
