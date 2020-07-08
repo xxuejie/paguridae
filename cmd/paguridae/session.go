@@ -325,7 +325,7 @@ func (s *Session) deleteFile(action Action) {
 func (s *Session) editFile(action Action) {
 	var errorBuffer bytes.Buffer
 	completeChan := make(chan bool, 1)
-	err := s.Server.Update(action.Selection.Id, func(d delta.Delta) (delta.Delta, error) {
+	err := s.Server.Update(action.ContentId(), func(d delta.Delta) (delta.Delta, error) {
 		f := editor.NewDeltaFile(d)
 		f.Select(int64(action.Selection.Range.Index),
 			int64(action.Selection.Range.Index+action.Selection.Range.Length))
@@ -348,9 +348,14 @@ func (s *Session) editFile(action Action) {
 		log.Printf("Editing file encountered error: %v", err)
 		return
 	}
-	if <-completeChan && errorBuffer.Len() > 0 {
-		labelId := action.LabelId()
-		s.newErrorBuffer(&labelId).Write(errorBuffer.Bytes())
+	if <-completeChan {
+		if errorBuffer.Len() > 0 {
+			labelId := action.LabelId()
+			s.newErrorBuffer(&labelId).Write(errorBuffer.Bytes())
+		}
+		// This will result in false positives, but let's stick with the simple path now
+		s.markDirty(action.ContentId())
+		s.Server.Broadcast()
 	}
 }
 
@@ -380,12 +385,16 @@ func (s *Session) runSamCommand(fileId uint32, cmd string) error {
 	})
 }
 
+func (s *Session) markDirty(contentId uint32) error {
+	return s.runSamCommand(contentId-1, `1s/\|\*?/|*/`)
+}
+
 func (s *Session) ApplyChanges(clientId uuid.UUID, changes []ot.ClientChange) error {
 	for _, change := range changes {
 		// Ignore client changes to meta file.
 		if change.Id > 0 {
 			s.Server.Submit(&clientId, change)
-			err := s.runSamCommand(change.Id-1, `1s/\|\*?/|*/`)
+			err := s.markDirty(change.Id)
 			if err != nil {
 				return err
 			}
