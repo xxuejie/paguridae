@@ -368,7 +368,6 @@ export class Row {
       setStyle(this.el, {height: `${height}%`});
     }
     if (change) {
-      console.log(change);
       const id = change.id;
       const delta = change.delta;
       const version = change.version;
@@ -388,10 +387,12 @@ export class Row {
         }
       }
     }
-    if (dirty) {
-      this.resizer.classList.add("dirty");
-    } else {
-      this.resizer.classList.remove("dirty");
+    if (typeof dirty === "boolean") {
+      if (dirty) {
+        this.resizer.classList.add("dirty");
+      } else {
+        this.resizer.classList.remove("dirty");
+      }
     }
   }
 
@@ -452,6 +453,33 @@ export class Layout {
         rows: []
       }
     ];
+  }
+
+  createColumn() {
+    const column = {
+      id: columnId(),
+      width: this.columns[this.columns.length - 1].width / 2,
+      rows: []
+    };
+    this.columns[this.columns.length - 1].width -= column.width;
+    this.columns.push(column);
+  }
+
+  removeColumn(rowId) {
+    if (this.columns.length === 1) {
+      return;
+    }
+    const columnIndex = this.columns.findIndex(column => {
+      return column.rows.findIndex(row => row.id === rowId) !== -1;
+    });
+    if (columnIndex !== -1) {
+      const column = this.columns[columnIndex];
+      this.columns.splice(columnIndex, 1);
+      this.columns[this.columns.length - 1].width += column.width;
+      column.rows.forEach(row => {
+        this._createRow(row.id);
+      });
+    }
   }
 
   verify(hash) {

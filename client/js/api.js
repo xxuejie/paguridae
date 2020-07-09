@@ -98,7 +98,7 @@ export class Api {
       for (const [id, update] of Object.entries(updates || {})) {
         const ack = this.acks[id] || 0;
         if (ack !== update.base) {
-          console.log(`Base mismatch for file ${id}, local: ${base}, remote: ${update.base}`);
+          console.log(`Base mismatch for file ${id}, local: ${ack}, remote: ${update.base}`);
           delete updates[id];
           continue;
         }
@@ -182,6 +182,17 @@ export class Api {
   }
 
   action(data) {
+    if (data) {
+      if (data.command === "Newcol") {
+        this.layout.createColumn();
+        this.onchange({layout: { columns: this.layout.columns }});
+        data = null;
+      } else if (data.command === "Delcol") {
+        this.layout.removeColumn(data.id - 1 + data.id % 2);
+        this.onchange({layout: { columns: this.layout.columns }});
+        data = null;
+      }
+    }
     // Move all possible buffered changes into inflight changes
     for (const { id, delta, base } of Object.values(this.buffered_changes)) {
       if (!this.inflight_changes[id]) {
