@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,8 +29,25 @@ const (
 	CommandTimeoutSeconds = 10
 )
 
-func extractPath(d delta.Delta) string {
-	return strings.SplitN(DeltaToString(d), " ", 2)[0]
+var (
+	PathRe = regexp.MustCompile(`^(?:\((\d+),(\d+)\))?(.*)$`)
+)
+
+func extractPath(d delta.Delta) (path string, start *uint64, length *uint64) {
+	fullPath := strings.SplitN(DeltaToString(d), " ", 2)[0]
+	matches := PathRe.FindStringSubmatch(fullPath)
+	if len(matches) != 4 {
+		log.Printf("Error extracting path from %s", fullPath)
+		return
+	}
+	path = matches[3]
+	startInt, startErr := strconv.ParseUint(matches[1], 10, 64)
+	lengthInt, lengthErr := strconv.ParseUint(matches[2], 10, 64)
+	if startErr == nil && lengthErr == nil {
+		start = &startInt
+		length = &lengthInt
+	}
+	return
 }
 
 type Session struct {
@@ -267,7 +285,8 @@ func (s *Session) CreateDummyFile() (uint32, error) {
 func (s *Session) FindOrCreateDummyFile(path string) (uint32, error) {
 	for _, change := range s.Server.AllContents() {
 		if change.Id%2 != 0 {
-			if extractPath(change.Delta) == path {
+			extractedPath, _, _ := extractPath(change.Delta)
+			if extractedPath == path {
 				// Return content Id based on current label Id
 				return change.Id + 1, nil
 			}
@@ -319,9 +338,12 @@ func (s *Session) FindOrOpenFile(path string, location string) (*Selection, bool
 	allContents := s.Server.AllContents()
 	var labelId uint32
 	for _, change := range allContents {
-		if change.Id%2 != 0 && extractPath(change.Delta) == path {
-			labelId = change.Id
-			break
+		if change.Id%2 != 0 {
+			extractedPath, _, _ := extractPath(change.Delta)
+			if extractedPath == path {
+				labelId = change.Id
+				break
+			}
 		}
 	}
 	if labelId != 0 {
@@ -420,8 +442,8 @@ func (s *Session) editFile(action Action) {
 func (s *Session) newErrorBuffer(labelId *uint32) *errorsBufferWriter {
 	var path string
 	if labelId != nil {
-		path = filepath.Dir(extractPath(
-			s.Server.Content(*labelId).Delta))
+		extractedPath, _, _ := extractPath(s.Server.Content(*labelId).Delta)
+		path = filepath.Dir(extractedPath)
 	}
 	return &errorsBufferWriter{
 		path: path,
@@ -447,6 +469,10 @@ func (s *Session) markDirty(contentId uint32) error {
 	return s.runSamCommand(contentId-1, `1s/\|\*?/|*/`)
 }
 
+func (s *Session) markClean(contentId uint32) error {
+	return s.runSamCommand(contentId-1, `1s/\|\*/|/`)
+}
+
 func (s *Session) ApplyChanges(clientId uuid.UUID, changes []ot.ClientChange) error {
 	for _, change := range changes {
 		// Ignore client changes to meta file.
@@ -466,7 +492,7 @@ func (s *Session) Execute(clientId uuid.UUID, action Action) (*Selection, bool, 
 	if labelContent == nil {
 		return nil, false, fmt.Errorf("Cannot find label file: %d, something must be wrong", action.LabelId())
 	}
-	labelPath := extractPath(labelContent.Delta)
+	labelPath, _, _ := extractPath(labelContent.Delta)
 
 	if action.Type == "search" {
 		var path string
@@ -560,7 +586,7 @@ func (s *Session) execute(labelPath string, action Action) error {
 		return nil
 	case "Put":
 		// Put command here ignores all embeds and just save texts to a file, later
-		// we can add a different command that do saves embeds in the buffer
+		// we can add a different command that do save embeds in the buffer
 		if action.Id == MetaFileId || len(labelPath) == 0 {
 			return nil
 		}
@@ -573,7 +599,7 @@ func (s *Session) execute(labelPath string, action Action) error {
 		if err != nil {
 			return err
 		}
-		return s.runSamCommand(action.LabelId(), `1s/\|\*/|/`)
+		return s.markClean(action.ContentId())
 	default:
 		if strings.HasPrefix(action.Command, "Edit") {
 			s.editFile(action)
