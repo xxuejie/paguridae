@@ -14,6 +14,8 @@ func DeltaToRunes(d delta.Delta) []rune {
 	for _, op := range d.Ops {
 		if op.Insert != nil {
 			result = append(result, op.Insert...)
+		} else if op.InsertEmbed != nil {
+			result = append(result, 0)
 		}
 	}
 	return result

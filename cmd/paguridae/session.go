@@ -292,29 +292,87 @@ func (s *Session) CreateDirectoryListingFile(path string) error {
 	return err
 }
 
-func (s *Session) FindOrOpenFile(path string) (uint32, error) {
+func samSearch(file editor.File, location string) (*Range, error) {
+	if len(location) == 0 {
+		return nil, nil
+	}
+	compiledCmd, err := editor.Compile(fmt.Sprintf("%s=", location))
+	if err != nil {
+		return nil, err
+	}
+	err = compiledCmd.Run(editor.Context{
+		File: file,
+	})
+	if err != nil {
+		return nil, err
+	}
+	q0, q1 := file.Dot()
+	return &Range{
+		Index:  uint32(q0),
+		Length: uint32(q1 - q0),
+	}, nil
+}
+
+func (s *Session) FindOrOpenFile(path string, location string) (*Selection, bool, error) {
 	// TODO: partial read for larger files
 	stat, err := os.Stat(path)
-	for _, change := range s.Server.AllContents() {
-		if change.Id%2 != 0 {
-			if extractPath(change.Delta) == path {
-				// Return content Id based on current label Id
-				return change.Id + 1, nil
-			}
+	allContents := s.Server.AllContents()
+	var labelId uint32
+	for _, change := range allContents {
+		if change.Id%2 != 0 && extractPath(change.Delta) == path {
+			labelId = change.Id
+			break
 		}
 	}
+	if labelId != 0 {
+		contentId := labelId + 1
+		for _, change := range allContents {
+			if change.Id == contentId {
+				r, err := samSearch(editor.NewDeltaFile(change.Delta), location)
+				// Sam search error is ignored here.
+				if err != nil {
+					log.Printf("Sam search error %v", err)
+				}
+				if r != nil {
+					return &Selection{
+						Id:    contentId,
+						Range: *r,
+					}, false, nil
+				} else {
+					return nil, false, nil
+				}
+			}
+		}
+		return nil, false, fmt.Errorf("Label file %d is found but content file %d is missing!", labelId, contentId)
+	}
 	if err != nil {
-		return 0, err
+		return nil, false, err
 	}
 	if stat.Size() > 128*1024 {
-		return 0, errors.New("File too large!")
+		return nil, false, errors.New("File too large!")
 	}
 	content, err := ioutil.ReadFile(path)
 	if err != nil {
-		return 0, err
+		return nil, false, err
 	}
 	contentString := string(content)
-	return s.createFile(fmt.Sprintf("%s%s", path, DefaultLabel), &contentString)
+	contentId, err := s.createFile(fmt.Sprintf("%s%s", path, DefaultLabel), &contentString)
+	if err != nil {
+		return nil, false, err
+	}
+	r, err := samSearch(editor.NewDeltaFile(*delta.New(nil).Insert(contentString, nil)), location)
+	// Sam search error is ignored here.
+	if err != nil {
+		log.Printf("Sam search error %v", err)
+	}
+	if r != nil {
+		return &Selection{
+			Id:    contentId,
+			Range: *r,
+		}, true, nil
+	} else {
+		return nil, false, nil
+	}
 }
 
 func (s *Session) deleteFile(action Action) {
@@ -403,10 +461,10 @@ func (s *Session) ApplyChanges(clientId uuid.UUID, changes []ot.ClientChange) er
 	return nil
 }
 
-func (s *Session) Execute(clientId uuid.UUID, action Action) error {
+func (s *Session) Execute(clientId uuid.UUID, action Action) (*Selection, bool, error) {
 	labelContent := s.Server.Content(action.LabelId())
 	if labelContent == nil {
-		return fmt.Errorf("Cannot find label file: %d, something must be wrong", action.LabelId())
+		return nil, false, fmt.Errorf("Cannot find label file: %d, something must be wrong", action.LabelId())
 	}
 	labelPath := extractPath(labelContent.Delta)
 
@@ -421,132 +479,174 @@ func (s *Session) Execute(clientId uuid.UUID, action Action) error {
 			}
 			path += action.Command
 		}
+		// Extract potential content location argument
+		parts := strings.SplitN(path, ":", 2)
+		path = parts[0]
+		var location string
+		if len(parts) == 2 {
+			location = parts[1]
+		}
 		path = filepath.Clean(path)
 		stat, err := os.Stat(path)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return nil
+				update := s.Server.Content(action.ContentId())
+				if update == nil {
+					return nil, false, nil
+				}
+				content := DeltaToRunes(update.Delta)
+				target := []rune(action.Command)
+				length := uint32(len(target))
+				start := action.Index + length
+				var found bool
+				for ; start+length <= uint32(len(content)); start++ {
+					found = true
+					for j := range target {
+						if content[int(start)+j] != target[j] {
+							found = false
+							break
+						}
+					}
+					if found {
+						break
+					}
+				}
+				if found {
+					return &Selection{
+						Id: action.ContentId(),
+						Range: Range{
+							Index:  start,
+							Length: length,
+						},
+					}, false, nil
+				} else {
+					return nil, false, nil
+				}
 			} else {
-				return err
+				return nil, false, err
 			}
 		}
 		if stat.IsDir() {
 			err = s.CreateDirectoryListingFile(path)
 		} else {
-			_, err = s.FindOrOpenFile(path)
+			return s.FindOrOpenFile(path, location)
 		}
+		if err != nil {
+			return nil, false, err
+		}
+		return nil, false, err
+	} else if action.Type == "execute" {
+		return nil, false, s.execute(labelPath, action)
+	} else {
+		return nil, false, errors.New(fmt.Sprint("Unknown action type:", action.Type))
+	}
+}
+
+func (s *Session) execute(labelPath string, action Action) error {
+	switch action.Command {
+	case "New":
+		_, err := s.CreateDummyFile()
+		return err
+	case "Del":
+		s.deleteFile(action)
+		return nil
+	case "Undo":
+		// Undo error is ignored
+		s.Server.Undo(action.ContentId())
+		return nil
+	case "Redo":
+		// Redo error is ignored
+		s.Server.Redo(action.ContentId())
+		return nil
+	case "Put":
+		// Put command here ignores all embeds and just save texts to a file, later
+		// we can add a different command that do saves embeds in the buffer
+		if action.Id == MetaFileId || len(labelPath) == 0 {
+			return nil
+		}
+		fileContent := s.Server.Content(action.ContentId())
+		var data []byte
+		if fileContent != nil {
+			data = []byte(DeltaToString(fileContent.Delta))
+		}
+		err := ioutil.WriteFile(labelPath, data, 0755)
 		if err != nil {
 			return err
 		}
-		return nil
-	} else if action.Type == "execute" {
-		switch action.Command {
-		case "New":
-			_, err := s.CreateDummyFile()
-			return err
-		case "Del":
-			s.deleteFile(action)
+		return s.runSamCommand(action.LabelId(), `1s/\|\*/|/`)
+	default:
+		if strings.HasPrefix(action.Command, "Edit") {
+			s.editFile(action)
 			return nil
-		case "Undo":
-			// Undo error is ignored
-			s.Server.Undo(action.ContentId())
-			return nil
-		case "Redo":
-			// Redo error is ignored
-			s.Server.Redo(action.ContentId())
-			return nil
-		case "Put":
-			// Put command here ignores all embeds and just save texts to a file, later
-			// we can add a different command that do saves embeds in the buffer
-			if action.Id == MetaFileId || len(labelPath) == 0 {
-				return nil
+		}
+		cmds := strings.Split(strings.TrimSpace(action.Command), " ")
+		if len(cmds) > 0 && len(cmds[0]) > 0 {
+			firstChar := string(cmds[0][0])
+			pipeSelectionToStdin := firstChar == "|" || firstChar == ">"
+			pipeStdoutToSelection := firstChar == "|" || firstChar == "<"
+			if pipeSelectionToStdin || pipeStdoutToSelection {
+				cmds[0] = cmds[0][1:]
 			}
-			fileContent := s.Server.Content(action.ContentId())
-			var data []byte
-			if fileContent != nil {
-				data = []byte(DeltaToString(fileContent.Delta))
-			}
-			err := ioutil.WriteFile(labelPath, data, 0755)
-			if err != nil {
-				return err
-			}
-			return s.runSamCommand(action.LabelId(), `1s/\|\*/|/`)
-		default:
-			if strings.HasPrefix(action.Command, "Edit") {
-				s.editFile(action)
-				return nil
-			}
-			cmds := strings.Split(strings.TrimSpace(action.Command), " ")
-			if len(cmds) > 0 && len(cmds[0]) > 0 {
-				firstChar := string(cmds[0][0])
-				pipeSelectionToStdin := firstChar == "|" || firstChar == ">"
-				pipeStdoutToSelection := firstChar == "|" || firstChar == "<"
-				if pipeSelectionToStdin || pipeStdoutToSelection {
-					cmds[0] = cmds[0][1:]
+			path, err := exec.LookPath(cmds[0])
+			if err == nil {
+				var cancelCmd context.CancelFunc
+				ctx := context.Background()
+				if pipeStdoutToSelection {
+					ctx, cancelCmd = context.WithTimeout(ctx, CommandTimeoutSeconds*time.Second)
 				}
-				path, err := exec.LookPath(cmds[0])
-				if err == nil {
-					var cancelCmd context.CancelFunc
-					ctx := context.Background()
-					if pipeStdoutToSelection {
-						ctx, cancelCmd = context.WithTimeout(ctx, CommandTimeoutSeconds*time.Second)
-					}
-					cmd := exec.CommandContext(ctx, path, cmds[1:]...)
-					// acmeaddr is different from paguridae addr. acmeaddr describes the command
-					// argument sent via mouse chording, while paguridaesaddr describes the addr
-					// for selected texts passed in via pipes. Later if we decide to add mouse
-					// chording, we can then include acmeaddr here.
-					cmd.Env = append(os.Environ(),
-						fmt.Sprintf("winid=%d", action.Id),
-						fmt.Sprintf("%%=%s", labelPath),
-						fmt.Sprintf("samfile=%s", labelPath),
-						fmt.Sprintf("paguridae_session=%s", s.Id()),
-						fmt.Sprintf("paguridae_selection_id=%d", action.Selection.Id),
-						fmt.Sprintf("paguridae_selection_addr=#%d,#%d", action.Selection.Range.Index,
-							action.Selection.Range.Index+action.Selection.Range.Length))
-					if pipeSelectionToStdin {
-						d := s.Server.Content(action.Selection.Id).Delta.Slice(
-							int(action.Selection.Range.Index),
-							int(action.Selection.Range.Index+action.Selection.Range.Length))
-						cmd.Stdin = strings.NewReader(DeltaToString(*d))
-					}
-					labelId := action.LabelId()
-					w := s.newErrorBuffer(&labelId)
-					cmd.Stderr = w
-					var stdoutBuffer bytes.Buffer
-					if pipeStdoutToSelection {
-						cmd.Stdout = &stdoutBuffer
-					} else {
-						cmd.Stdout = w
-					}
-					err = cmd.Start()
+				cmd := exec.CommandContext(ctx, path, cmds[1:]...)
+				// acmeaddr is different from paguridae addr. acmeaddr describes the command
+				// argument sent via mouse chording, while paguridaesaddr describes the addr
+				// for selected texts passed in via pipes. Later if we decide to add mouse
+				// chording, we can then include acmeaddr here.
+				cmd.Env = append(os.Environ(),
+					fmt.Sprintf("winid=%d", action.Id),
+					fmt.Sprintf("%%=%s", labelPath),
+					fmt.Sprintf("samfile=%s", labelPath),
+					fmt.Sprintf("paguridae_session=%s", s.Id()),
+					fmt.Sprintf("paguridae_selection_id=%d", action.Selection.Id),
+					fmt.Sprintf("paguridae_selection_addr=#%d,#%d", action.Selection.Range.Index,
+						action.Selection.Range.Index+action.Selection.Range.Length))
+				if pipeSelectionToStdin {
+					d := s.Server.Content(action.Selection.Id).Delta.Slice(
+						int(action.Selection.Range.Index),
+						int(action.Selection.Range.Index+action.Selection.Range.Length))
+					cmd.Stdin = strings.NewReader(DeltaToString(*d))
+				}
+				labelId := action.LabelId()
+				w := s.newErrorBuffer(&labelId)
+				cmd.Stderr = w
+				var stdoutBuffer bytes.Buffer
+				if pipeStdoutToSelection {
+					cmd.Stdout = &stdoutBuffer
+				} else {
+					cmd.Stdout = w
+				}
+				err = cmd.Start()
+				if err != nil {
+					return err
+				}
+				if pipeStdoutToSelection {
+					// Wait for command to finish first
+					err = cmd.Wait()
 					if err != nil {
 						return err
 					}
-					if pipeStdoutToSelection {
-						// Wait for command to finish first
-						err = cmd.Wait()
-						if err != nil {
-							return err
-						}
-						cancelCmd()
-						// Grab stdout data and modify selection
-						oldContent := s.Server.Content(action.Selection.Id)
-						s.Server.Submit(nil, ot.ClientChange{
-							Id:   action.Selection.Id,
-							Base: oldContent.Version,
-							Delta: *delta.New(nil).
-								Retain(int(action.Selection.Range.Index), nil).
-								Delete(int(action.Selection.Range.Length)).
-								Insert(string(stdoutBuffer.String()), nil),
-						})
-					}
+					cancelCmd()
+					// Grab stdout data and modify selection
+					oldContent := s.Server.Content(action.Selection.Id)
+					s.Server.Submit(nil, ot.ClientChange{
+						Id:   action.Selection.Id,
+						Base: oldContent.Version,
+						Delta: *delta.New(nil).
+							Retain(int(action.Selection.Range.Index), nil).
+							Delete(int(action.Selection.Range.Length)).
+							Insert(string(stdoutBuffer.String()), nil),
+					})
 				}
 			}
-			return nil
 		}
-	} else {
-		return errors.New(fmt.Sprint("Unknown action type:", action.Type))
+		return nil
 	}
 }
 

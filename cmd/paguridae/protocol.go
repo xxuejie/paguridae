@@ -55,6 +55,7 @@ type Request struct {
 }
 
 type Update struct {
-	Updates map[uint32]ot.ServerUpdate `json:"updates,omitempty"`
-	Hashes  map[uint32]string          `json:"hashes,omitempty"`
+	Updates   map[uint32]ot.ServerUpdate `json:"updates,omitempty"`
+	Hashes    map[uint32]string          `json:"hashes,omitempty"`
+	Selection *Selection                 `json:"selection,omitempty"`
 }

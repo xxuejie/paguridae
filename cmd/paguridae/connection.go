@@ -83,6 +83,8 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 	}()
 
 	timeout := 10 * time.Millisecond
+	var selection *Selection
+	var selectionCreated bool
 	for {
 		select {
 		case b := <-messageChan:
@@ -99,9 +101,11 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 				log.Print("Error applying changes:", err)
 			}
 			if request.Action != nil {
-				err = c.session.Execute(c.id, *request.Action)
+				aSelection, aSelectionCreated, err := c.session.Execute(c.id, *request.Action)
 				if err != nil {
 					log.Print("Error executing action:", err)
+				} else if aSelection != nil {
+					selection, selectionCreated = aSelection, aSelectionCreated
 				}
 			}
 			timeout = 10 * time.Millisecond
@@ -114,7 +118,7 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 		}
 
 		updates := c.GrabUpdates()
-		if len(updates) > 0 {
+		if len(updates) > 0 || selection != nil {
 			var hashes map[uint32]string
 			if c.session.VerifyContent {
 				hashes = make(map[uint32]string)
@@ -133,10 +137,18 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 				}
 			}
 
-			updateBytes, err := json.Marshal(Update{
+			updateData := Update{
 				Updates: updates,
 				Hashes:  hashes,
-			})
+			}
+			if selection != nil {
+				_, ok := updateData.Updates[selection.Id]
+				if (!selectionCreated) || ok {
+					updateData.Selection = selection
+					selection = nil
+				}
+			}
+			updateBytes, err := json.Marshal(updateData)
 			if err != nil {
 				return err
 			}

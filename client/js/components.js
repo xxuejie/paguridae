@@ -246,7 +246,7 @@ export class Window {
     return target;
   }
 
-  update({layout, rows, dirtyChanges}) {
+  update({layout, rows, dirtyChanges, selection}) {
     if (layout) {
       // Saving scroll positions for existing rows when layout needs changes.
       this.rows.views.forEach(row => {
@@ -300,6 +300,15 @@ export class Window {
         row.restoreScroll();
       });
       this.updateEditorSizes();
+    }
+
+    if (selection) {
+      const { lookup } = this.rows;
+      const id = selection.id - 1 + selection.id % 2;
+      const row = lookup[id];
+      if (row) {
+        row.update({ selection })
+      }
     }
   }
 
@@ -363,7 +372,7 @@ export class Row {
     });
   }
 
-  update({height, change, dirty}) {
+  update({height, change, dirty, selection}) {
     if (height) {
       setStyle(this.el, {height: `${height}%`});
     }
@@ -393,6 +402,10 @@ export class Row {
       } else {
         this.resizer.classList.remove("dirty");
       }
+    }
+    if (selection) {
+      this.contentEditor.setSelection(selection.range.index,
+                                      selection.range.length);
     }
   }
 

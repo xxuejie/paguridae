@@ -40,6 +40,7 @@ class Connection {
             (this.clientId != message.client ||
              this.sessionId != message.session)) {
           signalError("TODO: handle session change");
+          return;
         }
         console.log("Initialized!")
         this.clientId = message.client;
@@ -94,7 +95,8 @@ export class Api {
     this.layout = layout;
     this.onchange = onchange;
     this.onverify = onverify;
-    this.connection = new Connection(({updates, hashes}) => {
+    this.connection = new Connection(({updates, hashes, selection}) => {
+      updates = updates || [];
       for (const [id, update] of Object.entries(updates || {})) {
         const ack = this.acks[id] || 0;
         if (ack !== update.base) {
@@ -123,10 +125,13 @@ export class Api {
         }
       }
       const editorData = {};
+      if (selection) {
+        editorData.selection = selection;
+      }
       const layoutUpdate = updates[LAYOUT_ID];
       if (layoutUpdate) {
         this.layout.update(layoutUpdate);
-        editorData["layout"] = {
+        editorData.layout = {
           columns: this.layout.columns
         };
         this.acks[LAYOUT_ID] = layoutUpdate.version;
