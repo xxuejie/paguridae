@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net"
@@ -27,22 +28,29 @@ const (
 	DefaultLabel          = " | New Del Put"
 	MetaFileId            = 0
 	CommandTimeoutSeconds = 10
+	// TODO: maybe make those tunable?
+	PageSize   = int64(64 * 1024)
+	ScrollSize = int64(60 * 1024)
 )
 
 var (
-	PathRe = regexp.MustCompile(`^(?:\((\d+),(\d+)\))?(.*)$`)
+	PathRe = regexp.MustCompile(`^(?:\((\d+),(\d+),(\d+)\))?(.*)$`)
 )
 
-func extractPath(d delta.Delta) (path string, start *uint64, length *uint64) {
-	fullPath := strings.SplitN(DeltaToString(d), " ", 2)[0]
+func extractFullPath(d delta.Delta) string {
+	return strings.SplitN(DeltaToString(d, false), " ", 2)[0]
+}
+
+func extractPath(d delta.Delta) (path string, start *int64, length *int64) {
+	fullPath := extractFullPath(d)
 	matches := PathRe.FindStringSubmatch(fullPath)
-	if len(matches) != 4 {
+	if len(matches) != 5 {
 		log.Printf("Error extracting path from %s", fullPath)
 		return
 	}
-	path = matches[3]
-	startInt, startErr := strconv.ParseUint(matches[1], 10, 64)
-	lengthInt, lengthErr := strconv.ParseUint(matches[2], 10, 64)
+	path = matches[4]
+	startInt, startErr := strconv.ParseInt(matches[1], 10, 64)
+	lengthInt, lengthErr := strconv.ParseInt(matches[2], 10, 64)
 	if startErr == nil && lengthErr == nil {
 		start = &startInt
 		length = &lengthInt
@@ -218,7 +226,7 @@ func (s *Session) refreshMetafile() {
 			return nil, fmt.Errorf("Metafile does not exist, something is seriously wrong!")
 		}
 		oldInfos := make(map[uint32]string)
-		for _, line := range strings.Split(DeltaToString(oldMeta.Delta), "\n") {
+		for _, line := range strings.Split(DeltaToString(oldMeta.Delta, true), "\n") {
 			if len(line) == 0 {
 				continue
 			}
@@ -332,15 +340,49 @@ func samSearch(file editor.File, location string) (*Range, error) {
 	}, nil
 }
 
+func (s *Session) readAndCreateFile(path string, sizeCalculator func(info os.FileInfo) (*int64, *int64)) (uint32, string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, "", err
+	}
+	stat, err := file.Stat()
+	if err != nil {
+		return 0, "", err
+	}
+	start, length := sizeCalculator(stat)
+	var content []byte
+	var label string
+	if length != nil {
+		content = make([]byte, *length)
+		label = fmt.Sprintf("(%d,%d,%d)%s%s", *start, *length, stat.Size(), path, DefaultLabel)
+	} else {
+		content = make([]byte, stat.Size())
+		label = fmt.Sprintf("%s%s", path, DefaultLabel)
+	}
+	if start != nil {
+		_, err = file.Seek(*start, os.SEEK_SET)
+		if err != nil {
+			return 0, "", err
+		}
+	}
+	_, err = file.Read(content)
+	if err != nil {
+		return 0, "", err
+	}
+	contentString := string(content)
+	contentId, err := s.createFile(label, &contentString)
+	if err != nil {
+		return 0, "", err
+	}
+	return contentId, contentString, nil
+}
+
 func (s *Session) FindOrOpenFile(path string, location string) (*Selection, bool, error) {
-	// TODO: partial read for larger files
-	stat, err := os.Stat(path)
 	allContents := s.Server.AllContents()
 	var labelId uint32
 	for _, change := range allContents {
 		if change.Id%2 != 0 {
-			extractedPath, _, _ := extractPath(change.Delta)
-			if extractedPath == path {
+			if extractFullPath(change.Delta) == path {
 				labelId = change.Id
 				break
 			}
@@ -367,21 +409,18 @@ func (s *Session) FindOrOpenFile(path string, location string) (*Selection, bool
 		}
 		return nil, false, fmt.Errorf("Label file %d is found but content file %d is missing!", labelId, contentId)
 	}
+	contentId, contentString, err := s.readAndCreateFile(path, func(info os.FileInfo) (*int64, *int64) {
+		if int64(info.Size()) <= PageSize {
+			return nil, nil
+		}
+		start := int64(0)
+		length := int64(PageSize)
+		return &start, &length
+	})
 	if err != nil {
 		return nil, false, err
 	}
-	if stat.Size() > 128*1024 {
-		return nil, false, errors.New("File too large!")
-	}
-	content, err := ioutil.ReadFile(path)
-	if err != nil {
-		return nil, false, err
-	}
-	contentString := string(content)
-	contentId, err := s.createFile(fmt.Sprintf("%s%s", path, DefaultLabel), &contentString)
-	if err != nil {
-		return nil, false, err
-	}
+	// TODO: should we support sam search in arbitrary file location?
 	r, err := samSearch(editor.NewDeltaFile(*delta.New(nil).Insert(contentString, nil)), location)
 	// Sam search error is ignored here.
 	if err != nil {
@@ -492,7 +531,7 @@ func (s *Session) Execute(clientId uuid.UUID, action Action) (*Selection, bool, 
 	if labelContent == nil {
 		return nil, false, fmt.Errorf("Cannot find label file: %d, something must be wrong", action.LabelId())
 	}
-	labelPath, _, _ := extractPath(labelContent.Delta)
+	labelPath, start, length := extractPath(labelContent.Delta)
 
 	if action.Type == "search" {
 		var path string
@@ -520,7 +559,7 @@ func (s *Session) Execute(clientId uuid.UUID, action Action) (*Selection, bool, 
 				if update == nil {
 					return nil, false, nil
 				}
-				content := DeltaToRunes(update.Delta)
+				content := DeltaToRunes(update.Delta, false)
 				target := []rune(action.Command)
 				length := uint32(len(target))
 				start := action.Index + length
@@ -562,13 +601,13 @@ func (s *Session) Execute(clientId uuid.UUID, action Action) (*Selection, bool, 
 		}
 		return nil, false, err
 	} else if action.Type == "execute" {
-		return nil, false, s.execute(labelPath, action)
+		return nil, false, s.execute(labelPath, start, length, action)
 	} else {
 		return nil, false, errors.New(fmt.Sprint("Unknown action type:", action.Type))
 	}
 }
 
-func (s *Session) execute(labelPath string, action Action) error {
+func (s *Session) execute(labelPath string, start *int64, length *int64, action Action) error {
 	switch action.Command {
 	case "New":
 		_, err := s.CreateDummyFile()
@@ -584,18 +623,100 @@ func (s *Session) execute(labelPath string, action Action) error {
 		// Redo error is ignored
 		s.Server.Redo(action.ContentId())
 		return nil
+	case "Next":
+		if start == nil || length == nil {
+			return nil
+		}
+		// TODO: here we are always opening a new file, we can refactor FindOrOpenFile so
+		// we are reusing existing opened portions
+		_, _, err := s.readAndCreateFile(labelPath, func(info os.FileInfo) (*int64, *int64) {
+			newStart := *start + ScrollSize
+			newLength := PageSize
+			size := int64(info.Size())
+			if newLength > size-newStart {
+				newLength = size - newStart
+			}
+			return &newStart, &newLength
+		})
+		return err
+	case "Prev":
+		if start == nil || length == nil {
+			return nil
+		}
+		_, _, err := s.readAndCreateFile(labelPath, func(info os.FileInfo) (*int64, *int64) {
+			newStart := *start - ScrollSize
+			if newStart < 0 {
+				newStart = 0
+			}
+			newLength := PageSize
+			size := int64(info.Size())
+			if newLength > size-newStart {
+				newLength = size - newStart
+			}
+			return &newStart, &newLength
+		})
+		return err
 	case "Put":
-		// Put command here ignores all embeds and just save texts to a file, later
-		// we can add a different command that do save embeds in the buffer
 		if action.Id == MetaFileId || len(labelPath) == 0 {
 			return nil
 		}
 		fileContent := s.Server.Content(action.ContentId())
+		if fileContent == nil {
+			return fmt.Errorf("Cannot find file %d to save!", action.ContentId())
+		}
 		var data []byte
 		if fileContent != nil {
-			data = []byte(DeltaToString(fileContent.Delta))
+			// Put command here ignores all embeds and just save texts to a file, later
+			// we can add a different command that do save embeds in the buffer
+			data = []byte(DeltaToString(fileContent.Delta, false))
 		}
-		err := ioutil.WriteFile(labelPath, data, 0755)
+		savingFile, err := ioutil.TempFile(filepath.Dir(labelPath), "saving")
+		if err != nil {
+			return err
+		}
+		savingFilename := savingFile.Name()
+		sourceFile, err := os.Open(labelPath)
+		if err != nil {
+			return err
+		}
+		sourceFileStat, err := sourceFile.Stat()
+		if err != nil {
+			return err
+		}
+		if start != nil && *start > 0 {
+			_, err = io.CopyN(savingFile, sourceFile, *start)
+			if err != nil {
+				savingFile.Close()
+				os.Remove(savingFilename)
+				return err
+			}
+		}
+		_, err = savingFile.Write(data)
+		if err != nil {
+			savingFile.Close()
+			os.Remove(savingFilename)
+			return err
+		}
+		if start != nil && length != nil && *start+*length < sourceFileStat.Size() {
+			remainingStart := *start + *length
+			_, err = sourceFile.Seek(remainingStart, os.SEEK_SET)
+			if err != nil {
+				savingFile.Close()
+				os.Remove(savingFilename)
+				return err
+			}
+			_, err = io.CopyN(savingFile, sourceFile, sourceFileStat.Size()-remainingStart)
+			if err != nil {
+				savingFile.Close()
+				os.Remove(savingFilename)
+				return err
+			}
+		}
+		err = savingFile.Close()
+		if err != nil {
+			return err
+		}
+		err = os.Rename(savingFilename, labelPath)
 		if err != nil {
 			return err
 		}
@@ -637,7 +758,7 @@ func (s *Session) execute(labelPath string, action Action) error {
 					d := s.Server.Content(action.Selection.Id).Delta.Slice(
 						int(action.Selection.Range.Index),
 						int(action.Selection.Range.Index+action.Selection.Range.Length))
-					cmd.Stdin = strings.NewReader(DeltaToString(*d))
+					cmd.Stdin = strings.NewReader(DeltaToString(*d, false))
 				}
 				labelId := action.LabelId()
 				w := s.newErrorBuffer(&labelId)

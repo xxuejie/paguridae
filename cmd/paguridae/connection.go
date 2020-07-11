@@ -124,14 +124,16 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 				hashes = make(map[uint32]string)
 				for _, update := range updates {
 					if _, ok := hashes[update.Id]; !ok {
-						latestContent := *c.session.Server.Content(update.Id)
-						if latestContent.Version == update.Version {
-							content := DeltaToString(latestContent.Delta)
-							// QuillJS always add a new line at the very end of editor
-							if update.Id != MetaFileId {
-								content += "\n"
+						latestContent := c.session.Server.Content(update.Id)
+						if latestContent != nil {
+							if latestContent.Version == update.Version {
+								content := DeltaToString(latestContent.Delta, true)
+								// QuillJS always add a new line at the very end of editor
+								if update.Id != MetaFileId {
+									content += "\n"
+								}
+								hashes[update.Id] = fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
 							}
-							hashes[update.Id] = fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
 						}
 					}
 				}

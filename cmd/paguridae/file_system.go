@@ -338,7 +338,7 @@ func loop(s *Session, conn net.Conn, currentUser *user.User) {
 								i += 1
 								continue
 							}
-							labelContent := DeltaToString(files.files[i].Delta)
+							labelContent := DeltaToString(files.files[i].Delta, true)
 							isDirectory := 0
 							if m, _ := regexp.MatchString(`^[^ \n\|]+\/\s+\|`, labelContent); m {
 								isDirectory = 1
@@ -371,13 +371,13 @@ func loop(s *Session, conn net.Conn, currentUser *user.User) {
 					case Q_FILE_TAG:
 						change := s.Server.Content(fileId)
 						if change != nil {
-							data = []byte(DeltaToString(change.Delta))
+							data = []byte(DeltaToString(change.Delta, true))
 						}
 						fillRreadData(data, *fcall, &response)
 					case Q_FILE_BODY:
 						change := s.Server.Content(fileId + 1)
 						if change != nil {
-							data = []byte(DeltaToString(change.Delta))
+							data = []byte(DeltaToString(change.Delta, true))
 						}
 						fillRreadData(data, *fcall, &response)
 					}
