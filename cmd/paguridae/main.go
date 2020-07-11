@@ -30,6 +30,8 @@ var domain = flag.String("domain", "", "Domain to use for generating letsencrypt
 var certCache = flag.String("certCache", "./certs", "Cached directory for certificates")
 var redirectToHttps = flag.Bool("redirectoToHttps", true, "Redirect HTTP request to HTTPS request, only enabled when useHttps is also enabled")
 var sessionPurgeSeconds = flag.Int("sessionPurgeSeconds", 7200, "Seconds to wait before a session with zero connections is purged.")
+var pageSize = flag.Int("pageSize", 64*1024, "Page size to load in one batch")
+var scrollSize = flag.Int("scrollSize", 60*1024, "Scroll size of each page")
 
 var sessionManager *SessionManager
 

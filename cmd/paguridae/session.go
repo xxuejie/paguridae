@@ -28,9 +28,6 @@ const (
 	DefaultLabel          = " | New Del Put"
 	MetaFileId            = 0
 	CommandTimeoutSeconds = 10
-	// TODO: maybe make those tunable?
-	PageSize   = int64(64 * 1024)
-	ScrollSize = int64(60 * 1024)
 )
 
 var (
@@ -410,11 +407,11 @@ func (s *Session) FindOrOpenFile(path string, location string) (*Selection, bool
 		return nil, false, fmt.Errorf("Label file %d is found but content file %d is missing!", labelId, contentId)
 	}
 	contentId, contentString, err := s.readAndCreateFile(path, func(info os.FileInfo) (*int64, *int64) {
-		if int64(info.Size()) <= PageSize {
+		if info.Size() <= int64(*pageSize) {
 			return nil, nil
 		}
 		start := int64(0)
-		length := int64(PageSize)
+		length := int64(*pageSize)
 		return &start, &length
 	})
 	if err != nil {
@@ -630,8 +627,8 @@ func (s *Session) execute(labelPath string, start *int64, length *int64, action 
 		// TODO: here we are always opening a new file, we can refactor FindOrOpenFile so
 		// we are reusing existing opened portions
 		_, _, err := s.readAndCreateFile(labelPath, func(info os.FileInfo) (*int64, *int64) {
-			newStart := *start + ScrollSize
-			newLength := PageSize
+			newStart := *start + int64(*scrollSize)
+			newLength := int64(*pageSize)
 			size := int64(info.Size())
 			if newLength > size-newStart {
 				newLength = size - newStart
@@ -644,11 +641,11 @@ func (s *Session) execute(labelPath string, start *int64, length *int64, action 
 			return nil
 		}
 		_, _, err := s.readAndCreateFile(labelPath, func(info os.FileInfo) (*int64, *int64) {
-			newStart := *start - ScrollSize
+			newStart := *start - int64(*scrollSize)
 			if newStart < 0 {
 				newStart = 0
 			}
-			newLength := PageSize
+			newLength := int64(*pageSize)
 			size := int64(info.Size())
 			if newLength > size-newStart {
 				newLength = size - newStart
