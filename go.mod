@@ -13,7 +13,7 @@ require (
 	golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2
 	golang.org/x/xerrors v0.0.0-20191011141410-1b5146add898 // indirect
 	nhooyr.io/websocket v1.1.1
-	xuejie.space/c/go-quill-editor v0.0.0-20200413112626-1ee9caadfeae
+	xuejie.space/c/go-quill-editor v0.0.0-20200711041545-3425764e19ce
 )
 
 go 1.13

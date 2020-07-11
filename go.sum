@@ -71,5 +71,5 @@ mvdan.cc/sh v2.6.4+incompatible h1:eD6tDeh0pw+/TOTI1BBEryZ02rD2nMcFsgcvde7jffM=
 mvdan.cc/sh v2.6.4+incompatible/go.mod h1:IeeQbZq+x2SUGBensq/jge5lLQbS3XT2ktyp3wrt4x8=
 nhooyr.io/websocket v1.1.1 h1:zMwLlHmFSV5098CK3Cc9y0MrAVh3qmsWhqLr4z3PTfg=
 nhooyr.io/websocket v1.1.1/go.mod h1:ovvaecT36UqrInacsgoPYh0pdj0n8O7Tk9C/DeVPAAc=
-xuejie.space/c/go-quill-editor v0.0.0-20200413112626-1ee9caadfeae h1:OPDqqK63OlyHpJWeCOwbvuAhF5Ewg92vqik4Aan563w=
-xuejie.space/c/go-quill-editor v0.0.0-20200413112626-1ee9caadfeae/go.mod h1:w5dtHyGrVONjL23g+lM2QTRl6pV93vR1ne3G8Pz6Tec=
+xuejie.space/c/go-quill-editor v0.0.0-20200711041545-3425764e19ce h1:y1GgNZGKibJPpOOxloHcjfRlIkXxPYCq2YlCqBlLrK4=
+xuejie.space/c/go-quill-editor v0.0.0-20200711041545-3425764e19ce/go.mod h1:w5dtHyGrVONjL23g+lM2QTRl6pV93vR1ne3G8Pz6Tec=
