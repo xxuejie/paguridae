@@ -373,62 +373,34 @@ func (s *Session) CreateDirectoryListingFile(path string) error {
 	return err
 }
 
-func samSearch(file editor.File, location string) (*Range, error) {
+// Sam search error is ignored here.
+func samSearch(file editor.File, location string) (r Range) {
 	if len(location) == 0 {
-		return nil, nil
+		return
 	}
 	compiledCmd, err := editor.Compile(fmt.Sprintf("%s=", location))
 	if err != nil {
-		return nil, err
+		log.Printf("Compile sam command error: %v", err)
+		return
 	}
 	err = compiledCmd.Run(editor.Context{
 		File: file,
 	})
 	if err != nil {
-		return nil, err
+		log.Printf("Run sam command error: %v", err)
+		return
 	}
 	q0, q1 := file.Dot()
-	return &Range{
+	length := q1 - q0
+	// Selection range must be less than half of page size
+	if length > int64(*pageSize)/2 {
+		length = int64(*pageSize) / 2
+	}
+	r = Range{
 		Index:  uint32(q0),
-		Length: uint32(q1 - q0),
-	}, nil
-}
-
-func (s *Session) readAndCreateFile(path string, sizeCalculator func(info os.FileInfo) (*int64, *int64)) (uint32, string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return 0, "", err
+		Length: uint32(length),
 	}
-	stat, err := file.Stat()
-	if err != nil {
-		return 0, "", err
-	}
-	start, length := sizeCalculator(stat)
-	var content []byte
-	var label string
-	if length != nil {
-		content = make([]byte, *length)
-		label = fmt.Sprintf("(%d,%d,%d)%s%s", *start, *length, stat.Size(), path, DefaultLabel)
-	} else {
-		content = make([]byte, stat.Size())
-		label = fmt.Sprintf("%s%s", path, DefaultLabel)
-	}
-	if start != nil {
-		_, err = file.Seek(*start, os.SEEK_SET)
-		if err != nil {
-			return 0, "", err
-		}
-	}
-	_, err = file.Read(content)
-	if err != nil {
-		return 0, "", err
-	}
-	contentString := string(content)
-	contentId, err := s.createFile(label, &contentString)
-	if err != nil {
-		return 0, "", err
-	}
-	return contentId, contentString, nil
+	return
 }
 
 func (s *Session) FindOrOpenFile(pathInfo fullPathInfo) (*Selection, bool, error) {
@@ -446,68 +418,86 @@ func (s *Session) FindOrOpenFile(pathInfo fullPathInfo) (*Selection, bool, error
 		contentId := labelId + 1
 		for _, change := range allContents {
 			if change.Id == contentId {
-				r, err := samSearch(editor.NewDeltaFile(change.Delta), pathInfo.location)
-				// Sam search error is ignored here.
-				if err != nil {
-					log.Printf("Sam search error %v", err)
-				}
-				if r == nil {
-					r = &Range{
-						Index:  0,
-						Length: 0,
-					}
-				}
 				return &Selection{
 					Id:    contentId,
-					Range: *r,
+					Range: samSearch(editor.NewDeltaFile(change.Delta), pathInfo.location),
 				}, false, nil
 			}
 		}
 		return nil, false, fmt.Errorf("Label file %d is found but content file %d is missing!", labelId, contentId)
 	}
-	contentId, contentString, err := s.readAndCreateFile(pathInfo.path, func(info os.FileInfo) (*int64, *int64) {
-		if pathInfo.partialLoad() {
-			start := *pathInfo.start
+	file, err := os.Open(pathInfo.path)
+	if err != nil {
+		return nil, false, err
+	}
+	stat, err := file.Stat()
+	if err != nil {
+		return nil, false, err
+	}
+	var selectedRange *Range
+	if pathInfo.partialLoad() {
+		if *pathInfo.start < 0 {
+			*pathInfo.start = 0
+		}
+		remainingLength := stat.Size() - *pathInfo.start
+		if *pathInfo.length > remainingLength {
+			*pathInfo.length = remainingLength
+		}
+	} else if stat.Size() > int64(*pageSize) {
+		// When path does not specify a partial loading range, one can use sam command
+		// to search and jump to a place directly.
+		r := samSearch(editor.NewGoFile(file), pathInfo.location)
+		start, length := int64(0), int64(*pageSize)
+		if r.Length > 0 {
+			start = int64(r.Index) - 128
 			if start < 0 {
 				start = 0
 			}
-			length := *pathInfo.length
-			remainingLength := info.Size() - *pathInfo.start
+			remainingLength := stat.Size() - start
 			if length > remainingLength {
 				length = remainingLength
 			}
-			return &start, &length
 		}
-		if info.Size() <= int64(*pageSize) {
-			return nil, nil
+		r.Index -= uint32(start)
+		selectedRange = &r
+		pathInfo.start, pathInfo.length = &start, &length
+	}
+	var content []byte
+	var label string
+	if pathInfo.partialLoad() {
+		content = make([]byte, *pathInfo.length)
+		label = fmt.Sprintf("(%d,%d,%d)%s%s", *pathInfo.start, *pathInfo.length, stat.Size(), pathInfo.path, DefaultLabel)
+	} else {
+		content = make([]byte, stat.Size())
+		label = fmt.Sprintf("%s%s", pathInfo.path, DefaultLabel)
+	}
+	if pathInfo.partialLoad() {
+		_, err = file.Seek(*pathInfo.start, os.SEEK_SET)
+		if err != nil {
+			return nil, false, err
 		}
-		start := int64(0)
-		length := int64(*pageSize)
-		return &start, &length
-	})
+	}
+	_, err = file.Read(content)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, false, nil
-		}
 		return nil, false, err
 	}
-	// TODO: should we support sam search in arbitrary file location?
-	r, err := samSearch(
-		editor.NewDeltaFile(*delta.New(nil).Insert(contentString, nil)),
-		pathInfo.location)
-	// Sam search error is ignored here.
+	contentString := string(content)
+	contentId, err := s.createFile(label, &contentString)
 	if err != nil {
-		log.Printf("Sam search error %v", err)
+		return nil, false, err
 	}
-	if r == nil {
-		r = &Range{
-			Index:  0,
-			Length: 0,
-		}
+	if err != nil {
+		return nil, false, err
+	}
+	if selectedRange == nil {
+		r := samSearch(
+			editor.NewDeltaFile(*delta.New(nil).Insert(contentString, nil)),
+			pathInfo.location)
+		selectedRange = &r
 	}
 	return &Selection{
 		Id:    contentId,
-		Range: *r,
+		Range: *selectedRange,
 	}, true, nil
 }
 
