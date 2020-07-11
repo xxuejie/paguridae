@@ -31,28 +31,75 @@ const (
 )
 
 var (
-	PathRe = regexp.MustCompile(`^(?:\((\d+),(\d+),(\d+)\))?(.*)$`)
+	AbsolutePathRe = regexp.MustCompile(`^^[,\d\(\)]*/`)
+	PathRe         = regexp.MustCompile(`^(?:\((\d+),(\d+)(?:,(\d+))?\))?(.*)$`)
 )
+
+type fullPathInfo struct {
+	path     string
+	location string
+
+	start  *int64
+	length *int64
+
+	fileLength *int64
+}
+
+func (i fullPathInfo) partialLoad() bool {
+	return i.start != nil && i.length != nil
+}
+
+func (i fullPathInfo) serializePath() string {
+	var prefix string
+	if i.partialLoad() {
+		if i.fileLength != nil {
+			prefix = fmt.Sprintf("(%d,%d,%d)", *i.start, *i.length, *i.fileLength)
+		} else {
+			prefix = fmt.Sprintf("(%d,%d)", *i.start, *i.length)
+		}
+	}
+	return fmt.Sprintf("%s%s", prefix, i.path)
+}
+
+func (i fullPathInfo) serialize() string {
+	var suffix string
+	if len(i.location) > 0 {
+		suffix = fmt.Sprintf(":%s", suffix)
+	}
+	return fmt.Sprintf("%s%s", i.serializePath(), suffix)
+}
 
 func extractFullPath(d delta.Delta) string {
 	return strings.SplitN(DeltaToString(d, false), " ", 2)[0]
 }
 
-func extractPath(d delta.Delta) (path string, start *int64, length *int64) {
-	fullPath := extractFullPath(d)
-	matches := PathRe.FindStringSubmatch(fullPath)
+func parseFullPath(fullPath string) (info fullPathInfo) {
+	// Extract potential content location argument
+	parts := strings.SplitN(fullPath, ":", 2)
+	matches := PathRe.FindStringSubmatch(parts[0])
 	if len(matches) != 5 {
 		log.Printf("Error extracting path from %s", fullPath)
 		return
 	}
-	path = matches[4]
+	info.path = filepath.Clean(matches[4])
+	if len(parts) == 2 {
+		info.location = parts[1]
+	}
 	startInt, startErr := strconv.ParseInt(matches[1], 10, 64)
 	lengthInt, lengthErr := strconv.ParseInt(matches[2], 10, 64)
 	if startErr == nil && lengthErr == nil {
-		start = &startInt
-		length = &lengthInt
+		info.start = &startInt
+		info.length = &lengthInt
+	}
+	fileLengthInt, fileLengthErr := strconv.ParseInt(matches[3], 10, 64)
+	if fileLengthErr == nil {
+		info.fileLength = &fileLengthInt
 	}
 	return
+}
+
+func extractPath(d delta.Delta) fullPathInfo {
+	return parseFullPath(extractFullPath(d))
 }
 
 type Session struct {
@@ -290,8 +337,7 @@ func (s *Session) CreateDummyFile() (uint32, error) {
 func (s *Session) FindOrCreateDummyFile(path string) (uint32, error) {
 	for _, change := range s.Server.AllContents() {
 		if change.Id%2 != 0 {
-			extractedPath, _, _ := extractPath(change.Delta)
-			if extractedPath == path {
+			if extractPath(change.Delta).path == path {
 				// Return content Id based on current label Id
 				return change.Id + 1, nil
 			}
@@ -374,12 +420,12 @@ func (s *Session) readAndCreateFile(path string, sizeCalculator func(info os.Fil
 	return contentId, contentString, nil
 }
 
-func (s *Session) FindOrOpenFile(path string, location string) (*Selection, bool, error) {
+func (s *Session) FindOrOpenFile(pathInfo fullPathInfo) (*Selection, bool, error) {
 	allContents := s.Server.AllContents()
 	var labelId uint32
 	for _, change := range allContents {
 		if change.Id%2 != 0 {
-			if extractFullPath(change.Delta) == path {
+			if extractFullPath(change.Delta) == pathInfo.serializePath() {
 				labelId = change.Id
 				break
 			}
@@ -389,24 +435,34 @@ func (s *Session) FindOrOpenFile(path string, location string) (*Selection, bool
 		contentId := labelId + 1
 		for _, change := range allContents {
 			if change.Id == contentId {
-				r, err := samSearch(editor.NewDeltaFile(change.Delta), location)
+				r, err := samSearch(editor.NewDeltaFile(change.Delta), pathInfo.location)
 				// Sam search error is ignored here.
 				if err != nil {
 					log.Printf("Sam search error %v", err)
 				}
-				if r != nil {
-					return &Selection{
-						Id:    contentId,
-						Range: *r,
-					}, false, nil
-				} else {
-					return nil, false, nil
+				if r == nil {
+					r = &Range{
+						Index:  0,
+						Length: 0,
+					}
 				}
+				return &Selection{
+					Id:    contentId,
+					Range: *r,
+				}, false, nil
 			}
 		}
 		return nil, false, fmt.Errorf("Label file %d is found but content file %d is missing!", labelId, contentId)
 	}
-	contentId, contentString, err := s.readAndCreateFile(path, func(info os.FileInfo) (*int64, *int64) {
+	contentId, contentString, err := s.readAndCreateFile(pathInfo.path, func(info os.FileInfo) (*int64, *int64) {
+		if pathInfo.partialLoad() {
+			length := *pathInfo.length
+			remainingLength := info.Size() - *pathInfo.start
+			if length > remainingLength {
+				length = remainingLength
+			}
+			return pathInfo.start, &length
+		}
 		if info.Size() <= int64(*pageSize) {
 			return nil, nil
 		}
@@ -415,22 +471,29 @@ func (s *Session) FindOrOpenFile(path string, location string) (*Selection, bool
 		return &start, &length
 	})
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, false, nil
+		}
 		return nil, false, err
 	}
 	// TODO: should we support sam search in arbitrary file location?
-	r, err := samSearch(editor.NewDeltaFile(*delta.New(nil).Insert(contentString, nil)), location)
+	r, err := samSearch(
+		editor.NewDeltaFile(*delta.New(nil).Insert(contentString, nil)),
+		pathInfo.location)
 	// Sam search error is ignored here.
 	if err != nil {
 		log.Printf("Sam search error %v", err)
 	}
-	if r != nil {
-		return &Selection{
-			Id:    contentId,
-			Range: *r,
-		}, true, nil
-	} else {
-		return nil, false, nil
+	if r == nil {
+		r = &Range{
+			Index:  0,
+			Length: 0,
+		}
 	}
+	return &Selection{
+		Id:    contentId,
+		Range: *r,
+	}, true, nil
 }
 
 func (s *Session) deleteFile(action Action) {
@@ -478,8 +541,7 @@ func (s *Session) editFile(action Action) {
 func (s *Session) newErrorBuffer(labelId *uint32) *errorsBufferWriter {
 	var path string
 	if labelId != nil {
-		extractedPath, _, _ := extractPath(s.Server.Content(*labelId).Delta)
-		path = filepath.Dir(extractedPath)
+		path = filepath.Dir(extractPath(s.Server.Content(*labelId).Delta).path)
 	}
 	return &errorsBufferWriter{
 		path: path,
@@ -528,28 +590,21 @@ func (s *Session) Execute(clientId uuid.UUID, action Action) (*Selection, bool, 
 	if labelContent == nil {
 		return nil, false, fmt.Errorf("Cannot find label file: %d, something must be wrong", action.LabelId())
 	}
-	labelPath, start, length := extractPath(labelContent.Delta)
+	labelPath := extractFullPath(labelContent.Delta)
 
 	if action.Type == "search" {
-		var path string
-		if strings.HasPrefix(action.Command, "/") {
-			path = action.Command
+		var fullPath string
+		if AbsolutePathRe.MatchString(action.Command) {
+			fullPath = action.Command
 		} else {
-			path = labelPath
-			if !strings.HasSuffix(path, "/") {
-				path += "/../"
+			fullPath = labelPath
+			if !strings.HasSuffix(fullPath, "/") {
+				fullPath += "/../"
 			}
-			path += action.Command
+			fullPath += action.Command
 		}
-		// Extract potential content location argument
-		parts := strings.SplitN(path, ":", 2)
-		path = parts[0]
-		var location string
-		if len(parts) == 2 {
-			location = parts[1]
-		}
-		path = filepath.Clean(path)
-		stat, err := os.Stat(path)
+		pathInfo := parseFullPath(fullPath)
+		stat, err := os.Stat(pathInfo.path)
 		if err != nil {
 			if os.IsNotExist(err) {
 				update := s.Server.Content(action.ContentId())
@@ -589,22 +644,22 @@ func (s *Session) Execute(clientId uuid.UUID, action Action) (*Selection, bool, 
 			}
 		}
 		if stat.IsDir() {
-			err = s.CreateDirectoryListingFile(path)
+			err = s.CreateDirectoryListingFile(pathInfo.path)
 		} else {
-			return s.FindOrOpenFile(path, location)
+			return s.FindOrOpenFile(pathInfo)
 		}
 		if err != nil {
 			return nil, false, err
 		}
 		return nil, false, err
 	} else if action.Type == "execute" {
-		return nil, false, s.execute(labelPath, start, length, action)
+		return nil, false, s.execute(parseFullPath(labelPath), action)
 	} else {
 		return nil, false, errors.New(fmt.Sprint("Unknown action type:", action.Type))
 	}
 }
 
-func (s *Session) execute(labelPath string, start *int64, length *int64, action Action) error {
+func (s *Session) execute(pathInfo fullPathInfo, action Action) error {
 	switch action.Command {
 	case "New":
 		_, err := s.CreateDummyFile()
@@ -621,13 +676,13 @@ func (s *Session) execute(labelPath string, start *int64, length *int64, action 
 		s.Server.Redo(action.ContentId())
 		return nil
 	case "Next":
-		if start == nil || length == nil {
+		if !pathInfo.partialLoad() {
 			return nil
 		}
 		// TODO: here we are always opening a new file, we can refactor FindOrOpenFile so
 		// we are reusing existing opened portions
-		_, _, err := s.readAndCreateFile(labelPath, func(info os.FileInfo) (*int64, *int64) {
-			newStart := *start + int64(*scrollSize)
+		_, _, err := s.readAndCreateFile(pathInfo.path, func(info os.FileInfo) (*int64, *int64) {
+			newStart := *pathInfo.start + int64(*scrollSize)
 			newLength := int64(*pageSize)
 			size := int64(info.Size())
 			if newLength > size-newStart {
@@ -637,11 +692,11 @@ func (s *Session) execute(labelPath string, start *int64, length *int64, action 
 		})
 		return err
 	case "Prev":
-		if start == nil || length == nil {
+		if !pathInfo.partialLoad() {
 			return nil
 		}
-		_, _, err := s.readAndCreateFile(labelPath, func(info os.FileInfo) (*int64, *int64) {
-			newStart := *start - int64(*scrollSize)
+		_, _, err := s.readAndCreateFile(pathInfo.path, func(info os.FileInfo) (*int64, *int64) {
+			newStart := *pathInfo.start - int64(*scrollSize)
 			if newStart < 0 {
 				newStart = 0
 			}
@@ -654,7 +709,7 @@ func (s *Session) execute(labelPath string, start *int64, length *int64, action 
 		})
 		return err
 	case "Put":
-		if action.Id == MetaFileId || len(labelPath) == 0 {
+		if action.Id == MetaFileId || len(pathInfo.path) == 0 {
 			return nil
 		}
 		fileContent := s.Server.Content(action.ContentId())
@@ -667,12 +722,12 @@ func (s *Session) execute(labelPath string, start *int64, length *int64, action 
 			// we can add a different command that do save embeds in the buffer
 			data = []byte(DeltaToString(fileContent.Delta, false))
 		}
-		savingFile, err := ioutil.TempFile(filepath.Dir(labelPath), "saving")
+		savingFile, err := ioutil.TempFile(filepath.Dir(pathInfo.path), "saving")
 		if err != nil {
 			return err
 		}
 		savingFilename := savingFile.Name()
-		sourceFile, err := os.Open(labelPath)
+		sourceFile, err := os.Open(pathInfo.path)
 		if err != nil {
 			return err
 		}
@@ -680,8 +735,8 @@ func (s *Session) execute(labelPath string, start *int64, length *int64, action 
 		if err != nil {
 			return err
 		}
-		if start != nil && *start > 0 {
-			_, err = io.CopyN(savingFile, sourceFile, *start)
+		if pathInfo.partialLoad() && *pathInfo.start > 0 {
+			_, err = io.CopyN(savingFile, sourceFile, *pathInfo.start)
 			if err != nil {
 				savingFile.Close()
 				os.Remove(savingFilename)
@@ -694,8 +749,8 @@ func (s *Session) execute(labelPath string, start *int64, length *int64, action 
 			os.Remove(savingFilename)
 			return err
 		}
-		if start != nil && length != nil && *start+*length < sourceFileStat.Size() {
-			remainingStart := *start + *length
+		if pathInfo.partialLoad() && *pathInfo.start+*pathInfo.length < sourceFileStat.Size() {
+			remainingStart := *pathInfo.start + *pathInfo.length
 			_, err = sourceFile.Seek(remainingStart, os.SEEK_SET)
 			if err != nil {
 				savingFile.Close()
@@ -713,7 +768,7 @@ func (s *Session) execute(labelPath string, start *int64, length *int64, action 
 		if err != nil {
 			return err
 		}
-		err = os.Rename(savingFilename, labelPath)
+		err = os.Rename(savingFilename, pathInfo.path)
 		if err != nil {
 			return err
 		}
@@ -745,8 +800,8 @@ func (s *Session) execute(labelPath string, start *int64, length *int64, action 
 				// chording, we can then include acmeaddr here.
 				cmd.Env = append(os.Environ(),
 					fmt.Sprintf("winid=%d", action.Id),
-					fmt.Sprintf("%%=%s", labelPath),
-					fmt.Sprintf("samfile=%s", labelPath),
+					fmt.Sprintf("%%=%s", pathInfo.path),
+					fmt.Sprintf("samfile=%s", pathInfo.path),
 					fmt.Sprintf("paguridae_session=%s", s.Id()),
 					fmt.Sprintf("paguridae_selection_id=%d", action.Selection.Id),
 					fmt.Sprintf("paguridae_selection_addr=#%d,#%d", action.Selection.Range.Index,
