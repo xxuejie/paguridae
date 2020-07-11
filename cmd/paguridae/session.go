@@ -45,6 +45,17 @@ type fullPathInfo struct {
 	fileLength *int64
 }
 
+func (i fullPathInfo) same(other fullPathInfo) bool {
+	if i.path != other.path || i.location != other.location ||
+		i.partialLoad() != other.partialLoad() {
+		return false
+	}
+	if i.partialLoad() && (*i.start != *other.start || *i.length != *other.length) {
+		return false
+	}
+	return true
+}
+
 func (i fullPathInfo) partialLoad() bool {
 	return i.start != nil && i.length != nil
 }
@@ -425,7 +436,7 @@ func (s *Session) FindOrOpenFile(pathInfo fullPathInfo) (*Selection, bool, error
 	var labelId uint32
 	for _, change := range allContents {
 		if change.Id%2 != 0 {
-			if extractFullPath(change.Delta) == pathInfo.serializePath() {
+			if pathInfo.same(extractPath(change.Delta)) {
 				labelId = change.Id
 				break
 			}
@@ -456,12 +467,16 @@ func (s *Session) FindOrOpenFile(pathInfo fullPathInfo) (*Selection, bool, error
 	}
 	contentId, contentString, err := s.readAndCreateFile(pathInfo.path, func(info os.FileInfo) (*int64, *int64) {
 		if pathInfo.partialLoad() {
+			start := *pathInfo.start
+			if start < 0 {
+				start = 0
+			}
 			length := *pathInfo.length
 			remainingLength := info.Size() - *pathInfo.start
 			if length > remainingLength {
 				length = remainingLength
 			}
-			return pathInfo.start, &length
+			return &start, &length
 		}
 		if info.Size() <= int64(*pageSize) {
 			return nil, nil
@@ -653,68 +668,56 @@ func (s *Session) Execute(clientId uuid.UUID, action Action) (*Selection, bool, 
 		}
 		return nil, false, err
 	} else if action.Type == "execute" {
-		return nil, false, s.execute(parseFullPath(labelPath), action)
+		return s.execute(parseFullPath(labelPath), action)
 	} else {
 		return nil, false, errors.New(fmt.Sprint("Unknown action type:", action.Type))
 	}
 }
 
-func (s *Session) execute(pathInfo fullPathInfo, action Action) error {
+func (s *Session) execute(pathInfo fullPathInfo, action Action) (*Selection, bool, error) {
 	switch action.Command {
 	case "New":
 		_, err := s.CreateDummyFile()
-		return err
+		return nil, false, err
 	case "Del":
 		s.deleteFile(action)
-		return nil
+		return nil, false, nil
 	case "Undo":
 		// Undo error is ignored
 		s.Server.Undo(action.ContentId())
-		return nil
+		return nil, false, nil
 	case "Redo":
 		// Redo error is ignored
 		s.Server.Redo(action.ContentId())
-		return nil
+		return nil, false, nil
 	case "Next":
 		if !pathInfo.partialLoad() {
-			return nil
+			return nil, false, nil
 		}
-		// TODO: here we are always opening a new file, we can refactor FindOrOpenFile so
-		// we are reusing existing opened portions
-		_, _, err := s.readAndCreateFile(pathInfo.path, func(info os.FileInfo) (*int64, *int64) {
-			newStart := *pathInfo.start + int64(*scrollSize)
-			newLength := int64(*pageSize)
-			size := int64(info.Size())
-			if newLength > size-newStart {
-				newLength = size - newStart
-			}
-			return &newStart, &newLength
-		})
-		return err
+		newStart := *pathInfo.start + int64(*scrollSize)
+		newLength := int64(*pageSize)
+		pathInfo.start = &newStart
+		pathInfo.length = &newLength
+		return s.FindOrOpenFile(pathInfo)
 	case "Prev":
 		if !pathInfo.partialLoad() {
-			return nil
+			return nil, false, nil
 		}
-		_, _, err := s.readAndCreateFile(pathInfo.path, func(info os.FileInfo) (*int64, *int64) {
-			newStart := *pathInfo.start - int64(*scrollSize)
-			if newStart < 0 {
-				newStart = 0
-			}
-			newLength := int64(*pageSize)
-			size := int64(info.Size())
-			if newLength > size-newStart {
-				newLength = size - newStart
-			}
-			return &newStart, &newLength
-		})
-		return err
+		newStart := *pathInfo.start - int64(*scrollSize)
+		if newStart < 0 {
+			newStart = 0
+		}
+		newLength := int64(*pageSize)
+		pathInfo.start = &newStart
+		pathInfo.length = &newLength
+		return s.FindOrOpenFile(pathInfo)
 	case "Put":
 		if action.Id == MetaFileId || len(pathInfo.path) == 0 {
-			return nil
+			return nil, false, nil
 		}
 		fileContent := s.Server.Content(action.ContentId())
 		if fileContent == nil {
-			return fmt.Errorf("Cannot find file %d to save!", action.ContentId())
+			return nil, false, fmt.Errorf("Cannot find file %d to save!", action.ContentId())
 		}
 		var data []byte
 		if fileContent != nil {
@@ -724,30 +727,30 @@ func (s *Session) execute(pathInfo fullPathInfo, action Action) error {
 		}
 		savingFile, err := ioutil.TempFile(filepath.Dir(pathInfo.path), "saving")
 		if err != nil {
-			return err
+			return nil, false, err
 		}
 		savingFilename := savingFile.Name()
 		sourceFile, err := os.Open(pathInfo.path)
 		if err != nil {
-			return err
+			return nil, false, err
 		}
 		sourceFileStat, err := sourceFile.Stat()
 		if err != nil {
-			return err
+			return nil, false, err
 		}
 		if pathInfo.partialLoad() && *pathInfo.start > 0 {
 			_, err = io.CopyN(savingFile, sourceFile, *pathInfo.start)
 			if err != nil {
 				savingFile.Close()
 				os.Remove(savingFilename)
-				return err
+				return nil, false, err
 			}
 		}
 		_, err = savingFile.Write(data)
 		if err != nil {
 			savingFile.Close()
 			os.Remove(savingFilename)
-			return err
+			return nil, false, err
 		}
 		if pathInfo.partialLoad() && *pathInfo.start+*pathInfo.length < sourceFileStat.Size() {
 			remainingStart := *pathInfo.start + *pathInfo.length
@@ -755,28 +758,28 @@ func (s *Session) execute(pathInfo fullPathInfo, action Action) error {
 			if err != nil {
 				savingFile.Close()
 				os.Remove(savingFilename)
-				return err
+				return nil, false, err
 			}
 			_, err = io.CopyN(savingFile, sourceFile, sourceFileStat.Size()-remainingStart)
 			if err != nil {
 				savingFile.Close()
 				os.Remove(savingFilename)
-				return err
+				return nil, false, err
 			}
 		}
 		err = savingFile.Close()
 		if err != nil {
-			return err
+			return nil, false, err
 		}
 		err = os.Rename(savingFilename, pathInfo.path)
 		if err != nil {
-			return err
+			return nil, false, err
 		}
-		return s.markClean(action.ContentId())
+		return nil, false, s.markClean(action.ContentId())
 	default:
 		if strings.HasPrefix(action.Command, "Edit") {
 			s.editFile(action)
-			return nil
+			return nil, false, nil
 		}
 		cmds := strings.Split(strings.TrimSpace(action.Command), " ")
 		if len(cmds) > 0 && len(cmds[0]) > 0 {
@@ -823,13 +826,13 @@ func (s *Session) execute(pathInfo fullPathInfo, action Action) error {
 				}
 				err = cmd.Start()
 				if err != nil {
-					return err
+					return nil, false, err
 				}
 				if pipeStdoutToSelection {
 					// Wait for command to finish first
 					err = cmd.Wait()
 					if err != nil {
-						return err
+						return nil, false, err
 					}
 					cancelCmd()
 					// Grab stdout data and modify selection
@@ -845,7 +848,7 @@ func (s *Session) execute(pathInfo fullPathInfo, action Action) error {
 				}
 			}
 		}
-		return nil
+		return nil, false, nil
 	}
 }
 
