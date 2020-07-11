@@ -664,8 +664,20 @@ func (s *Session) Execute(clientId uuid.UUID, action Action) (*Selection, bool, 
 	}
 }
 
+func parseScrollSize(commands []string) int64 {
+	if len(commands) != 2 {
+		return int64(*scrollSize)
+	}
+	scrollInt, scrollErr := strconv.ParseInt(commands[1], 10, 64)
+	if scrollErr != nil {
+		return int64(*scrollSize)
+	}
+	return scrollInt
+}
+
 func (s *Session) execute(pathInfo fullPathInfo, action Action) (*Selection, bool, error) {
-	switch action.Command {
+	commands := strings.Split(action.Command, " ")
+	switch commands[0] {
 	case "New":
 		_, err := s.CreateDummyFile()
 		return nil, false, err
@@ -684,7 +696,7 @@ func (s *Session) execute(pathInfo fullPathInfo, action Action) (*Selection, boo
 		if !pathInfo.partialLoad() {
 			return nil, false, nil
 		}
-		newStart := *pathInfo.start + int64(*scrollSize)
+		newStart := *pathInfo.start + parseScrollSize(commands)
 		newLength := int64(*pageSize)
 		pathInfo.start = &newStart
 		pathInfo.length = &newLength
@@ -693,7 +705,7 @@ func (s *Session) execute(pathInfo fullPathInfo, action Action) (*Selection, boo
 		if !pathInfo.partialLoad() {
 			return nil, false, nil
 		}
-		newStart := *pathInfo.start - int64(*scrollSize)
+		newStart := *pathInfo.start - parseScrollSize(commands)
 		if newStart < 0 {
 			newStart = 0
 		}
