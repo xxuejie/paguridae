@@ -374,7 +374,7 @@ func (s *Session) CreateDirectoryListingFile(path string) error {
 }
 
 // Sam search error is ignored here.
-func samSearch(file editor.File, location string) (r Range) {
+func samSearch(file editor.File, location string) (q0 int64, q1 int64) {
 	if len(location) == 0 {
 		return
 	}
@@ -390,17 +390,21 @@ func samSearch(file editor.File, location string) (r Range) {
 		log.Printf("Run sam command error: %v", err)
 		return
 	}
-	q0, q1 := file.Dot()
+	q0, q1 = file.Dot()
 	length := q1 - q0
 	// Selection range must be less than half of page size
 	if length > int64(*pageSize)/2 {
 		length = int64(*pageSize) / 2
 	}
-	r = Range{
-		Index:  uint32(q0),
-		Length: uint32(length),
-	}
+	q1 = q0 + length
 	return
+}
+
+func qToRange(q0 int64, q1 int64) Range {
+	return Range{
+		Index:  uint32(q0),
+		Length: uint32(q1 - q0),
+	}
 }
 
 func (s *Session) FindOrOpenFile(pathInfo fullPathInfo) (*Selection, bool, error) {
@@ -420,7 +424,7 @@ func (s *Session) FindOrOpenFile(pathInfo fullPathInfo) (*Selection, bool, error
 			if change.Id == contentId {
 				return &Selection{
 					Id:    contentId,
-					Range: samSearch(editor.NewDeltaFile(change.Delta), pathInfo.location),
+					Range: qToRange(samSearch(editor.NewDeltaFile(change.Delta), pathInfo.location)),
 				}, false, nil
 			}
 		}
@@ -446,10 +450,10 @@ func (s *Session) FindOrOpenFile(pathInfo fullPathInfo) (*Selection, bool, error
 	} else if stat.Size() > int64(*pageSize) {
 		// When path does not specify a partial loading range, one can use sam command
 		// to search and jump to a place directly.
-		r := samSearch(editor.NewGoFile(file), pathInfo.location)
+		q0, q1 := samSearch(editor.NewGoFile(file), pathInfo.location)
 		start, length := int64(0), int64(*pageSize)
-		if r.Length > 0 {
-			start = int64(r.Index) - 128
+		if q1-q0 > 0 {
+			start = q0 - 128
 			if start < 0 {
 				start = 0
 			}
@@ -458,7 +462,8 @@ func (s *Session) FindOrOpenFile(pathInfo fullPathInfo) (*Selection, bool, error
 				length = remainingLength
 			}
 		}
-		r.Index -= uint32(start)
+		q0 -= start
+		r := qToRange(q0, q1)
 		selectedRange = &r
 		pathInfo.start, pathInfo.length = &start, &length
 	}
@@ -490,9 +495,9 @@ func (s *Session) FindOrOpenFile(pathInfo fullPathInfo) (*Selection, bool, error
 		return nil, false, err
 	}
 	if selectedRange == nil {
-		r := samSearch(
+		r := qToRange(samSearch(
 			editor.NewDeltaFile(*delta.New(nil).Insert(contentString, nil)),
-			pathInfo.location)
+			pathInfo.location))
 		selectedRange = &r
 	}
 	return &Selection{
