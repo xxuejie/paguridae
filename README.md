@@ -2,10 +2,13 @@
 
 A Web IDE hugely inspired from [Acme](http://acme.cat-v.org/) that is almost a clone of acme :)
 
-# Build Dependencies
+# How To Build
 
-* [esc](https://github.com/mjibson/esc)
-* [esbuild](https://github.com/evanw/esbuild)
+```bash
+$ go get -u github.com/mjibson/esc
+$ GO111MODULE=on go get github.com/evanw/esbuild/cmd/esbuild@v0.6.5
+$ make prod
+```
 
 # Internals
 
