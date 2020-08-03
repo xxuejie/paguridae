@@ -1,0 +1,27 @@
+os: linux
+language: go
+dist: bionic
+go:
+  - 1.14.x
+
+addons:
+  apt:
+    packages:
+      - cloc
+
+install:
+  - pushd ~
+  - go get -u github.com/mjibson/esc
+  - GO111MODULE=on go get github.com/evanw/esbuild/cmd/esbuild@v0.6.5
+  - popd
+
+script:
+  - make test
+  - make fmt
+  - make prod
+  - gzip -9 dist/index.html
+  - if [ -n "$(find dist/index.html.gz -prune -size +102400c)" ]; then exit 1; fi
+  - rm -rf dist/index.html.gz
+  - if [ -n "$(find paguridae -prune -size +20971520c)" ]; then exit 1; fi
+  - if [ "$(cloc . | grep SUM | awk '{print $5}')" -gt "10000" ]; then exit 1; fi
+  - git diff --exit-code
