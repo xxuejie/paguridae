@@ -177,7 +177,9 @@ func NewSession(verifyContent bool) (*Session, error) {
 	}()
 	go func() {
 		for range metaFileChan {
-			session.refreshMetafile()
+			if err := session.refreshMetafile(); err != nil {
+				log.Printf("Error refreshing meta file: %v", err)
+			}
 		}
 	}()
 	// Creating meta file, meta file ID must be 0
@@ -268,8 +270,8 @@ func idToMeta(id uint32) delta.Delta {
 	return *delta.New(nil).Insert(fmt.Sprintf("%d 0 0\n", id), nil)
 }
 
-func (s *Session) refreshMetafile() {
-	err := s.Server.UpdateAll(func(changes []ot.ServerUpdate) ([]ot.ClientChange, error) {
+func (s *Session) refreshMetafile() error {
+	return s.Server.UpdateAll(func(changes []ot.ServerUpdate) ([]ot.ClientChange, error) {
 		var oldMeta *ot.ServerUpdate
 		for _, change := range changes {
 			if change.Id == MetaFileId {
@@ -315,11 +317,6 @@ func (s *Session) refreshMetafile() {
 			},
 		}, nil
 	})
-	if err != nil {
-		log.Printf("Refreshing metafile error: %v", err)
-	} else {
-		s.Server.Broadcast()
-	}
 }
 
 func (s *Session) closeFile(fileId uint32) {
@@ -603,6 +600,9 @@ func (s *Session) Execute(clientId uuid.UUID, action Action) (*Selection, bool, 
 	labelPath := extractFullPath(labelContent.Delta)
 
 	if action.Type == "search" {
+		if action.Command == "" {
+			return nil, false, nil
+		}
 		var fullPath string
 		if AbsolutePathRe.MatchString(action.Command) {
 			fullPath = action.Command
@@ -663,7 +663,11 @@ func (s *Session) Execute(clientId uuid.UUID, action Action) (*Selection, bool, 
 		}
 		return nil, false, err
 	} else if action.Type == "execute" {
-		return s.execute(parseFullPath(labelPath), action)
+		aSelection, aSelectionCreated, err := s.execute(parseFullPath(labelPath), action)
+		if err != nil {
+			s.newErrorBuffer(nil).Write([]byte(fmt.Sprintf("Execution error: %v", err)))
+		}
+		return aSelection, aSelectionCreated, err
 	} else {
 		return nil, false, errors.New(fmt.Sprint("Unknown action type:", action.Type))
 	}
@@ -732,19 +736,27 @@ func (s *Session) execute(pathInfo fullPathInfo, action Action) (*Selection, boo
 			// we can add a different command that do save embeds in the buffer
 			data = []byte(DeltaToString(fileContent.Delta, false))
 		}
+		var sourceFile *os.File
+		sourceFileStat, err := os.Stat(pathInfo.path)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				return nil, false, err
+			}
+		}
+		if err == nil {
+			sourceFile, err = os.Open(pathInfo.path)
+			if err != nil {
+				return nil, false, err
+			}
+		}
+		if sourceFile == nil && pathInfo.partialLoad() {
+			return nil, false, fmt.Errorf("Partial loading requires a file that exists!")
+		}
 		savingFile, err := ioutil.TempFile(filepath.Dir(pathInfo.path), "saving")
 		if err != nil {
 			return nil, false, err
 		}
 		savingFilename := savingFile.Name()
-		sourceFile, err := os.Open(pathInfo.path)
-		if err != nil {
-			return nil, false, err
-		}
-		sourceFileStat, err := sourceFile.Stat()
-		if err != nil {
-			return nil, false, err
-		}
 		if pathInfo.partialLoad() && *pathInfo.start > 0 {
 			_, err = io.CopyN(savingFile, sourceFile, *pathInfo.start)
 			if err != nil {

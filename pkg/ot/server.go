@@ -375,6 +375,9 @@ func (s *Server) Start() {
 						Delta: d,
 					})
 					command.errorChan <- err
+					if err == nil {
+						s.broadcast()
+					}
 				} else {
 					command.errorChan <- fmt.Errorf("Cannot find file %d", command.fileId)
 				}
@@ -397,6 +400,9 @@ func (s *Server) Start() {
 					}
 				}
 				command.errorChan <- err
+				if err == nil {
+					s.broadcast()
+				}
 			case typeBroadcast:
 				s.broadcast()
 			case typeUndo:

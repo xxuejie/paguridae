@@ -119,9 +119,9 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 
 		updates := c.GrabUpdates()
 		if len(updates) > 0 || selection != nil {
-			var hashes map[uint32]string
+			var hashes map[uint32]Hash
 			if c.session.VerifyContent {
-				hashes = make(map[uint32]string)
+				hashes = make(map[uint32]Hash)
 				for _, update := range updates {
 					if _, ok := hashes[update.Id]; !ok {
 						latestContent := c.session.Server.Content(update.Id)
@@ -132,7 +132,10 @@ func (c *Connection) Serve(ctx context.Context, socketConn *websocket.Conn) erro
 								if update.Id != MetaFileId {
 									content += "\n"
 								}
-								hashes[update.Id] = fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
+								hashes[update.Id] = Hash{
+									Hash:    fmt.Sprintf("%x", sha256.Sum256([]byte(content))),
+									Version: latestContent.Version,
+								}
 							}
 						}
 					}

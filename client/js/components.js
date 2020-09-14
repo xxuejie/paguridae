@@ -411,9 +411,9 @@ export class Row {
 
   verify(id, hash) {
     if (id === this.label.__id) {
-      verifyContent(this.labelEditor.getContents(), hash);
+      verifyContent(this.labelEditor.getContents(), this.label.__version, hash);
     } else if (id === this.content.__id) {
-      verifyContent(this.contentEditor.getContents(), hash);
+      verifyContent(this.contentEditor.getContents(), this.content.__version, hash);
     } else {
       console.log("Unknown ID: " + id + " for row: " + this.id);
     }
@@ -496,7 +496,7 @@ export class Layout {
   }
 
   verify(hash) {
-    verifyContent(this.data, hash);
+    verifyContent(this.data, this.version, hash);
   }
 
   update(change) {

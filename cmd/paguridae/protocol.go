@@ -54,8 +54,13 @@ type Request struct {
 	Action  *Action           `json:"action,omitempty"`
 }
 
+type Hash struct {
+	Hash    string `json:"hash"`
+	Version uint32 `json:"version"`
+}
+
 type Update struct {
 	Updates   map[uint32]ot.ServerUpdate `json:"updates,omitempty"`
-	Hashes    map[uint32]string          `json:"hashes,omitempty"`
+	Hashes    map[uint32]Hash            `json:"hashes,omitempty"`
 	Selection *Selection                 `json:"selection,omitempty"`
 }

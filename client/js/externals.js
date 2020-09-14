@@ -9,9 +9,13 @@ export const setTimeout = window.setTimeout;
 
 const subtle = window.crypto && window.crypto.subtle;
 
-export function verifyContent(delta, hash) {
+export function verifyContent(delta, localVersion, { hash, version }) {
   if (!subtle) {
     console.log("Hash provided but subtle crypto is missing, maybe checking the browser again?");
+    return;
+  }
+  if (localVersion !== version) {
+    console.log("Hash provided is for a different version, skipping validation");
     return;
   }
   const text = delta.filter(op => typeof op.insert === "string")

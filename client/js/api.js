@@ -150,7 +150,14 @@ export class Api {
           this.layout.verify(hashes[LAYOUT_ID]);
           delete hashes[LAYOUT_ID];
         }
-        this.onverify(hashes);
+        // Only verify hashes with no inflight or buffered changes
+        const filteredHashes = {};
+        Object.keys(hashes).forEach((contentId) => {
+          if (!(this.buffered_changes[contentId] || this.inflight_changes[contentId])) {
+            filteredHashes[contentId] = hashes[contentId];
+          }
+        });
+        this.onverify(filteredHashes);
       }
       if (ackChanged) {
         this.action(null);
