@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"9fans.net/go/plan9"
+	"github.com/fmpwizard/go-quilljs-delta/delta"
 	"xuejie.space/c/paguridae/pkg/ot"
 )
 
@@ -147,6 +149,12 @@ func Start9PFileSystem(s *Session) error {
 	return nil
 }
 
+type openedFile struct {
+	buffer []byte
+	q0     int64
+	q1     int64
+}
+
 func loop(s *Session, conn net.Conn, currentUser *user.User) {
 	// Tversion
 	fcall, err := plan9.ReadFcall(conn)
@@ -185,7 +193,7 @@ func loop(s *Session, conn net.Conn, currentUser *user.User) {
 		return
 	}
 	allocedFiles := make(map[uint32]plan9.Qid)
-	openedFiles := make(map[uint32]bool)
+	openedFiles := make(map[uint32]*openedFile)
 	allocedFiles[fcall.Afid] = plan9.Qid{
 		Path: PATH_TYPE_ROOT,
 		Vers: 0,
@@ -262,7 +270,7 @@ func loop(s *Session, conn net.Conn, currentUser *user.User) {
 				}
 			}
 			if accepted {
-				openedFiles[fcall.Fid] = true
+				openedFiles[fcall.Fid] = &openedFile{}
 				response.Type = plan9.Ropen
 				response.Qid = qid
 				response.Iounit = 0
@@ -275,7 +283,7 @@ func loop(s *Session, conn net.Conn, currentUser *user.User) {
 				response.Ename = fmt.Sprintf("Fid %d is not assigned!", fcall.Fid)
 				break
 			}
-			if !openedFiles[fcall.Fid] {
+			if openedFiles[fcall.Fid] == nil {
 				response.Ename = fmt.Sprintf("Fid %d is not opened!", fcall.Fid)
 				break
 			}
@@ -431,7 +439,7 @@ func loop(s *Session, conn net.Conn, currentUser *user.User) {
 				response.Ename = fmt.Sprintf("Fid %d is not assigned!", fcall.Fid)
 				break
 			}
-			if !openedFiles[fcall.Fid] {
+			if openedFiles[fcall.Fid] == nil {
 				response.Ename = fmt.Sprintf("Fid %d is not opened!", fcall.Fid)
 				break
 			}
@@ -450,6 +458,7 @@ func loop(s *Session, conn net.Conn, currentUser *user.User) {
 				}
 			} else {
 				fileId := uint32(qid.Path >> 32)
+				composeChange := false
 				switch qType {
 				case Q_FILE_ERRORS:
 					_, err := s.newErrorBuffer(&fileId).Write(fcall.Data)
@@ -470,6 +479,42 @@ func loop(s *Session, conn net.Conn, currentUser *user.User) {
 					s.Flush()
 					response.Count = uint32(len(fcall.Data))
 					response.Type = plan9.Rwrite
+				case Q_FILE_RICH_DATA:
+					composeChange = true
+					fallthrough
+				case Q_FILE_RICH_BODY:
+					f := openedFiles[fcall.Fid]
+					f.buffer = append(f.buffer, fcall.Data...)
+					var err error
+					if len(f.buffer) >= 12 {
+						var length int
+						var n int
+						n, err = fmt.Sscanf(string(f.buffer[0:12]), "%11d ", &length)
+						if err == nil && n == 0 {
+							err = fmt.Errorf("Invalid rich data length format!")
+						}
+						if err == nil && len(f.buffer)-12 >= length {
+							richData := f.buffer[12 : 12+length]
+							f.buffer = f.buffer[12+length:]
+							var d delta.Delta
+							err = json.Unmarshal(richData, &d)
+							if err == nil {
+								err = s.Server.Update(fileId+1, func(content delta.Delta) (delta.Delta, error) {
+									if composeChange {
+										return d, nil
+									} else {
+										return *delta.New(nil).Retain(content.Length(), nil).Concat(d), nil
+									}
+								})
+							}
+						}
+					}
+					if err != nil {
+						response.Ename = fmt.Sprintf("Write error: %v", err)
+					} else {
+						response.Count = uint32(len(fcall.Data))
+						response.Type = plan9.Rwrite
+					}
 				}
 			}
 		}
