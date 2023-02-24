@@ -10,7 +10,7 @@ require (
 	github.com/tdewolff/minify v2.3.6+incompatible
 	github.com/tdewolff/parse v2.3.4+incompatible // indirect
 	github.com/tdewolff/test v1.0.6 // indirect
-	golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2
+	golang.org/x/crypto v0.1.0
 	golang.org/x/xerrors v0.0.0-20191011141410-1b5146add898 // indirect
 	nhooyr.io/websocket v1.1.1
 	xuejie.space/c/go-quill-editor v0.0.0-20200711041545-3425764e19ce
